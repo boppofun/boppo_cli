@@ -71,7 +71,7 @@ async fn sync_dir(
     let host_files = list_host_dir(host_dir).await?;
     let device_files = list_remote_dir(device_url, device_dir, bearer_token, client).await?;
     if verbose {
-        eprintln!("Syncing {} to {}", host_dir, device_dir);
+        eprintln!("Syncing {}", device_dir);
     }
     for host_file in &host_files {
         if host_file.1.is_dir {
@@ -154,11 +154,11 @@ async fn transfer_file(
     let device_path = format!("{device_dir}/{name}");
     let url = format!("{device_url}/files/upload?path={device_path}");
     eprintln!(
-        "Uploading {} bytes from {} to {} because {}",
+        "Uploading {} bytes because {}\n\tfrom: {}\n\tto: {}",
         contents.len(),
+        reason,
         host_path,
         device_path,
-        reason
     );
     if dry_run {
         return Ok(());
