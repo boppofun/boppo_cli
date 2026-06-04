@@ -39,6 +39,10 @@ enum Commands {
     Device(DeviceArgs),
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
+    /// List the contents of a directory on the device
+    ReadDir(ReadDirArgs),
+    /// Download a file from the device to the local machine
+    DownloadFile(DownloadFileArgs),
     /// Upload music files to the device
     UploadMusic(UploadMusicArgs),
     /// Print the version and exit
@@ -62,6 +66,22 @@ struct SyncDirArgs {
     /// Print verbose progress messages
     #[arg(short, long, default_value = "false")]
     verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReadDirArgs {
+    /// Path on the device to list
+    path: String,
+}
+
+#[derive(Debug, Args)]
+struct DownloadFileArgs {
+    /// Path of the file on the device
+    #[arg(long)]
+    device_path: String,
+    /// Local path to write the file to
+    #[arg(long)]
+    host_path: String,
 }
 
 #[derive(Debug, Args)]
@@ -160,6 +180,29 @@ async fn main() -> anyhow::Result<()> {
             if args.verbose {
                 eprintln!("Done syncing all files.");
             }
+        }
+
+        Commands::ReadDir(args) => {
+            let (_, creds) = get_active_device(&store, &cli.device)?;
+            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+            let entries = client.read_dir(&args.path).await?;
+            if entries.is_empty() {
+                println!("(empty)");
+            } else {
+                for entry in entries {
+                    let kind = if entry.is_dir { "d" } else { "f" };
+                    println!("{} {:>10}  {}", kind, entry.size, entry.name);
+                }
+            }
+        }
+
+        Commands::DownloadFile(args) => {
+            let (_, creds) = get_active_device(&store, &cli.device)?;
+            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+            let data = client.download_file(&args.device_path).await?;
+            std::fs::write(&args.host_path, &data)
+                .with_context(|| format!("failed to write {}", args.host_path))?;
+            eprintln!("Downloaded {} -> {} ({} bytes)", args.device_path, args.host_path, data.len());
         }
 
         Commands::UploadMusic(args) => {
