@@ -266,32 +266,62 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
 
 /// Initiate the device pairing flow and return the bearer token.
 ///
-/// Posts to `/get-password?requestid=<request_id>`. The device will display a
-/// pairing prompt; the call blocks until the user approves or the device
-/// times out. On approval the response body contains the password to use for
-/// all subsequent authenticated requests.
+/// Polls `POST /get-password?requestid=<request_id>` until the device
+/// approves or rejects the pairing request.  The response is always JSON:
 ///
-/// `request_id` is shown on the device screen to help the user identify the
-/// pairing request — use a short, human-readable string.
-pub async fn get_password(base_url: &str, request_id: &str) -> anyhow::Result<String> {
+/// - `{"status": "in-progress"}` — the user has not yet responded on the
+///   device; the function sleeps 2 seconds and retries.
+/// - `{"status": "failed"}` — the user rejected the pairing request;
+///   returns `Err`.
+/// - `{"status": "success", "password": "..."}` — pairing approved; returns
+///   `Ok(password)`.
+///
+/// On the first iteration a message is printed to stderr asking the user to
+/// check the device.
+pub async fn get_password(base_url: &str, request_id: u64) -> anyhow::Result<String> {
     let client = ClientBuilder::new()
         .danger_accept_invalid_certs(true)
         .build()
         .context("failed to build reqwest client")?;
     let url = format!("{}/get-password", base_url);
-    let resp = client
-        .post(&url)
-        .query(&[("requestid", request_id)])
-        .body("")
-        .send()
-        .await
-        .context("get-password request failed")?;
-    let status = resp.status().as_u16();
-    if status != 200 {
-        anyhow::bail!("get-password returned status {}", status);
+    let request_id_str = request_id.to_string();
+
+    eprintln!("Please check your device and approve the pairing request.");
+
+    loop {
+        let resp = client
+            .post(&url)
+            .query(&[("requestid", request_id_str.as_str())])
+            .body("")
+            .send()
+            .await
+            .context("get-password request failed")?;
+        let status = resp.status().as_u16();
+        if status != 200 {
+            anyhow::bail!("get-password returned status {}", status);
+        }
+        let body: serde_json::Value =
+            resp.json().await.context("failed to parse get-password response as JSON")?;
+        match body.get("status").and_then(|s| s.as_str()) {
+            Some("in-progress") => {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            Some("failed") => {
+                anyhow::bail!("pairing was rejected on the device");
+            }
+            Some("success") => {
+                let password = body
+                    .get("password")
+                    .and_then(|p| p.as_str())
+                    .context("get-password success response missing 'password' field")?
+                    .to_owned();
+                return Ok(password);
+            }
+            _ => {
+                anyhow::bail!("unexpected get-password response: {}", body);
+            }
+        }
     }
-    let password = resp.text().await.context("failed to read get-password response body")?;
-    Ok(password)
 }
 
 /// Parse one line of the `read-dir` response into a [`DirEntry`].

@@ -34,6 +34,8 @@ enum Commands {
     },
     /// Manage registered devices
     Device(DeviceArgs),
+    /// Discover Boppo devices on the local network via mDNS
+    DiscoverDevices,
 }
 
 #[derive(Debug, Args)]
@@ -219,23 +221,13 @@ async fn main() -> anyhow::Result<()> {
             }
 
             DeviceCommands::Pair(args) => {
-                let request_id = format!(
-                    "boppo-cli-{}",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs()
-                );
-                eprintln!(
-                    "Pairing with device {}...",
-                    args.serial
-                );
-                eprintln!(
-                    "Please approve the pairing request on your device. Request ID: {}",
-                    request_id
-                );
+                let request_id: u64 = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                eprintln!("Pairing with device {}...", args.serial);
                 let password =
-                    boppo_device_https_client::get_password(&args.url, &request_id).await?;
+                    boppo_device_https_client::get_password(&args.url, request_id).await?;
                 let creds = DeviceCredentials {
                     password,
                     url: args.url,
@@ -246,9 +238,126 @@ async fn main() -> anyhow::Result<()> {
                 println!("Device {} paired and saved.", args.serial);
             }
         },
+
+        Commands::DiscoverDevices => {
+            eprintln!("Searching for Boppo devices (5s)...");
+            let devices = tokio::task::spawn_blocking(browse_mdns).await??;
+
+            if devices.is_empty() {
+                println!("No devices found.");
+                return Ok(());
+            }
+
+            for device in devices {
+                let known = store.get_device(&device.serial).is_some();
+                if known {
+                    println!(
+                        "  {} \"{}\" @ {} [already in store]",
+                        device.serial, device.device_name, device.url
+                    );
+                } else {
+                    println!(
+                        "  {} \"{}\" @ {} [not paired]",
+                        device.serial, device.device_name, device.url
+                    );
+                    print!("Pair with this device? [y/N] ");
+                    use std::io::Write;
+                    std::io::stdout().flush()?;
+                    let mut input = String::new();
+                    std::io::stdin().read_line(&mut input)?;
+                    if input.trim().eq_ignore_ascii_case("y") {
+                        let request_id: u64 = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs();
+                        let password =
+                            boppo_device_https_client::get_password(&device.url, request_id).await?;
+                        print!("Nickname for this device (Enter to skip): ");
+                        std::io::stdout().flush()?;
+                        let mut nick_input = String::new();
+                        std::io::stdin().read_line(&mut nick_input)?;
+                        let nickname = nick_input.trim();
+                        let nickname = if nickname.is_empty() {
+                            None
+                        } else {
+                            Some(nickname.to_owned())
+                        };
+                        store.set_device(
+                            device.serial.clone(),
+                            DeviceCredentials {
+                                password,
+                                url: device.url.clone(),
+                                nickname,
+                            },
+                        );
+                        if store.default.is_none() {
+                            store.set_default(device.serial.clone());
+                            println!("Set as default device.");
+                        }
+                        store.save(&store_path)?;
+                        println!("Device {} paired and saved.", device.serial);
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+struct DiscoveredDevice {
+    serial: String,
+    device_name: String,
+    url: String,
+}
+
+fn browse_mdns() -> anyhow::Result<Vec<DiscoveredDevice>> {
+    use mdns_sd::{ServiceDaemon, ServiceEvent};
+    use std::net::IpAddr;
+    use std::time::{Duration, Instant};
+
+    let mdns = ServiceDaemon::new().context("failed to start mDNS daemon")?;
+    let receiver = mdns.browse("_boppo._tcp.local.").context("failed to browse mDNS")?;
+
+    let timeout = Duration::from_secs(5);
+    let deadline = Instant::now() + timeout;
+    let mut devices = Vec::new();
+
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match receiver.recv_timeout(remaining) {
+            Ok(ServiceEvent::ServiceResolved(info)) => {
+                let hostname = info.get_hostname(); // "boppo-0120001234.local."
+                let serial = hostname
+                    .strip_prefix("boppo-")
+                    .and_then(|s| s.strip_suffix(".local."))
+                    .unwrap_or(hostname)
+                    .to_owned();
+                let device_name = info
+                    .get_property_val_str("device_name")
+                    .unwrap_or("unknown")
+                    .to_owned();
+                // Prefer IPv4; the HTTPS API is on port 443 regardless of the mDNS port field
+                let ip = info
+                    .get_addresses()
+                    .iter()
+                    .find(|a| matches!(a, IpAddr::V4(_)))
+                    .or_else(|| info.get_addresses().iter().next())
+                    .map(|a| a.to_string())
+                    .unwrap_or_default();
+                let url = format!("https://{}:443", ip);
+                devices.push(DiscoveredDevice { serial, device_name, url });
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+
+    let _ = mdns.shutdown();
+    Ok(devices)
 }
 
 fn get_active_device<'a>(
