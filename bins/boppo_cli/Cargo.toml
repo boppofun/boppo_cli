@@ -1,0 +1,16 @@
+[package]
+name = "boppo_cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "boppo"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-recursion = "1"
+boppo_credential_store = { path = "../../libs/boppo_credential_store" }
+boppo_device_https_client = { path = "../../libs/boppo_device_https_client" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

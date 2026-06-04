@@ -1,13 +1,7 @@
-[package]
-name = "sync_dir_to_tablet"
-version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-anyhow = "1.0.72"
-async-recursion = "1.0.4"
-clap = { version = "4.3.19", features = ["derive"] }
-reqwest = "0.11.18"
-tokio = { version = "1.29.1", features = ["rt-multi-thread", "macros"] }
+[workspace]
+members = [
+    "libs/boppo_device_https_client",
+    "libs/boppo_credential_store",
+    "bins/boppo_cli",
+]
+resolver = "2"

@@ -1,0 +1,10 @@
+[package]
+name = "boppo_credential_store"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+dirs = "5"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
