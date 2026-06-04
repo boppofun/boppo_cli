@@ -7,6 +7,8 @@ use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_p
 use boppo_device::{browse_mdns, pair_device, sync_dir};
 use boppo_device_https_client::{BoppoDevice, BoppoDeviceHttpsClient};
 
+const MUSIC_DIR: &str = "/sd/activities/user/music";
+
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -37,6 +39,8 @@ enum Commands {
     Device(DeviceArgs),
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
+    /// Upload music files to the device
+    UploadMusic(UploadMusicArgs),
     /// Print the version and exit
     Version,
 }
@@ -58,6 +62,13 @@ struct SyncDirArgs {
     /// Print verbose progress messages
     #[arg(short, long, default_value = "false")]
     verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct UploadMusicArgs {
+    /// One or more local music files to upload
+    #[arg(required = true)]
+    files: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -148,6 +159,23 @@ async fn main() -> anyhow::Result<()> {
             .await?;
             if args.verbose {
                 eprintln!("Done syncing all files.");
+            }
+        }
+
+        Commands::UploadMusic(args) => {
+            let (_, creds) = get_active_device(&store, &cli.device)?;
+            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+            for path in &args.files {
+                let raw_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .with_context(|| format!("invalid file name: {}", path.display()))?;
+                let sanitized = sanitize_file_name(raw_name);
+                let device_path = format!("{}/{}", MUSIC_DIR, sanitized);
+                let data = std::fs::read(path)
+                    .with_context(|| format!("failed to read {}", path.display()))?;
+                client.upload_file(&device_path, data).await?;
+                eprintln!("Uploaded {} -> {}", path.display(), device_path);
             }
         }
 
@@ -302,6 +330,16 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Mirrors the sanitizeFileName logic in the phone app's files_notifier.dart.
+fn sanitize_file_name(name: &str) -> String {
+    name.replace('\'', "")
+        .replace('\n', "")
+        .replace('?', "")
+        .replace('/', "")
+        .trim()
+        .to_owned()
 }
 
 fn get_active_device<'a>(
