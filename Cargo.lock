@@ -138,13 +138,10 @@ name = "boppo_cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-recursion",
  "boppo_credential_store",
+ "boppo_device",
  "boppo_device_https_client",
  "clap",
- "mdns-sd",
- "mockall",
- "tempfile",
  "tokio",
 ]
 
@@ -156,6 +153,19 @@ dependencies = [
  "dirs",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "boppo_device"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-recursion",
+ "boppo_device_https_client",
+ "mdns-sd",
+ "mockall",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

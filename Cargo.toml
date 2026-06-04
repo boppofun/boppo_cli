@@ -2,6 +2,7 @@
 members = [
     "libs/boppo_device_https_client",
     "libs/boppo_credential_store",
+    "libs/boppo_device",
     "bins/boppo_cli",
 ]
 resolver = "2"

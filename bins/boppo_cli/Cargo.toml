@@ -9,14 +9,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-async-recursion = "1"
 boppo_credential_store = { path = "../../libs/boppo_credential_store" }
+boppo_device = { path = "../../libs/boppo_device" }
 boppo_device_https_client = { path = "../../libs/boppo_device_https_client" }
 clap = { version = "4", features = ["derive"] }
-mdns-sd = "0.11"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
-
-[dev-dependencies]
-boppo_device_https_client = { path = "../../libs/boppo_device_https_client", features = ["mock"] }
-mockall = "0.12"
-tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
