@@ -261,21 +261,25 @@ async fn main() -> anyhow::Result<()> {
                         "  {} \"{}\" @ {} [not paired]",
                         device.serial, device.device_name, device.url
                     );
-                    print!("Pair with this device? [y/N] ");
+                    print!("Pair with this device? [Y/n] ");
                     std::io::stdout().flush()?;
                     let mut input = String::new();
                     std::io::stdin().read_line(&mut input)?;
-                    if input.trim().eq_ignore_ascii_case("y") {
+                    let trimmed = input.trim();
+                    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
                         let password = pair_device(&device.url).await?;
-                        print!("Nickname for this device (Enter to skip): ");
+                        print!(
+                            "Nickname for this device (Enter for \"{}\"): ",
+                            device.device_name
+                        );
                         std::io::stdout().flush()?;
                         let mut nick_input = String::new();
                         std::io::stdin().read_line(&mut nick_input)?;
-                        let nickname = nick_input.trim();
-                        let nickname = if nickname.is_empty() {
-                            None
+                        let nick_input = nick_input.trim();
+                        let nickname = if nick_input.is_empty() {
+                            Some(device.device_name.clone())
                         } else {
-                            Some(nickname.to_owned())
+                            Some(nick_input.to_owned())
                         };
                         store.set_device(
                             device.serial.clone(),
