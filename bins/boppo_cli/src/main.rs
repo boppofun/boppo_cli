@@ -40,7 +40,9 @@ enum Commands {
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
     /// List the contents of a directory on the device
-    ReadDir(ReadDirArgs),
+    LsDir(LsDirArgs),
+    /// Remove a file from the device
+    RmFile(RmFileArgs),
     /// Download a file from the device to the local machine
     DownloadFile(DownloadFileArgs),
     /// Upload music files to the device
@@ -69,8 +71,14 @@ struct SyncDirArgs {
 }
 
 #[derive(Debug, Args)]
-struct ReadDirArgs {
+struct LsDirArgs {
     /// Path on the device to list
+    path: String,
+}
+
+#[derive(Debug, Args)]
+struct RmFileArgs {
+    /// Path of the file to remove on the device
     path: String,
 }
 
@@ -182,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::ReadDir(args) => {
+        Commands::LsDir(args) => {
             let (_, creds) = get_active_device(&store, &cli.device)?;
             let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
             let entries = client.read_dir(&args.path).await?;
@@ -194,6 +202,13 @@ async fn main() -> anyhow::Result<()> {
                     println!("{} {:>10}  {}", kind, entry.size, entry.name);
                 }
             }
+        }
+
+        Commands::RmFile(args) => {
+            let (_, creds) = get_active_device(&store, &cli.device)?;
+            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+            client.remove_file(&args.path).await?;
+            eprintln!("Removed {}", args.path);
         }
 
         Commands::DownloadFile(args) => {
