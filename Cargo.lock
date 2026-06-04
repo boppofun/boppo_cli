@@ -143,6 +143,8 @@ dependencies = [
  "boppo_device_https_client",
  "clap",
  "mdns-sd",
+ "mockall",
+ "tempfile",
  "tokio",
 ]
 

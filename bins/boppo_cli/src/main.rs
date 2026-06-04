@@ -486,3 +486,145 @@ fn list_host_dir(host_dir: &str) -> anyhow::Result<HashMap<String, HostFileAttr>
     }
     Ok(entries)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::sync_dir;
+    use boppo_device_https_client::{DirEntry, MockBoppoDevice};
+    use mockall::predicate::{always, eq};
+    use tempfile::TempDir;
+
+    fn write_file(dir: &std::path::Path, name: &str, content: &[u8]) {
+        std::fs::write(dir.join(name), content).unwrap();
+    }
+
+    /// A new file on the host that is absent from the device should be uploaded.
+    #[tokio::test]
+    async fn sync_dir_uploads_missing_files() {
+        let tmp = TempDir::new().unwrap();
+        write_file(tmp.path(), "hello.txt", b"hello world");
+
+        let mut mock = MockBoppoDevice::new();
+        mock.expect_read_dir()
+            .with(eq("/device"))
+            .once()
+            .returning(|_| Ok(vec![]));
+        mock.expect_upload_file()
+            .with(eq("/device/hello.txt"), always())
+            .once()
+            .returning(|_, _| Ok(()));
+
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+            .await
+            .unwrap();
+    }
+
+    /// A file that already exists on the device with the same size should not be re-uploaded.
+    #[tokio::test]
+    async fn sync_dir_skips_files_with_matching_size() {
+        let tmp = TempDir::new().unwrap();
+        write_file(tmp.path(), "same.txt", b"12345"); // 5 bytes
+
+        let mut mock = MockBoppoDevice::new();
+        mock.expect_read_dir()
+            .with(eq("/device"))
+            .once()
+            .returning(|_| Ok(vec![DirEntry {
+                name: "same.txt".to_owned(),
+                size: 5,
+                is_dir: false,
+            }]));
+        // No expect_upload_file — mockall will panic if upload_file is called unexpectedly.
+
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+            .await
+            .unwrap();
+    }
+
+    /// A file whose size differs from the device copy should be re-uploaded.
+    #[tokio::test]
+    async fn sync_dir_reuploads_files_with_different_size() {
+        let tmp = TempDir::new().unwrap();
+        write_file(tmp.path(), "changed.txt", b"new content"); // 11 bytes
+
+        let mut mock = MockBoppoDevice::new();
+        mock.expect_read_dir()
+            .with(eq("/device"))
+            .once()
+            .returning(|_| Ok(vec![DirEntry {
+                name: "changed.txt".to_owned(),
+                size: 5, // stale; differs from 11
+                is_dir: false,
+            }]));
+        mock.expect_upload_file()
+            .with(eq("/device/changed.txt"), always())
+            .once()
+            .returning(|_, _| Ok(()));
+
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+            .await
+            .unwrap();
+    }
+
+    /// Files inside subdirectories should be synced recursively.
+    #[tokio::test]
+    async fn sync_dir_recurses_into_subdirectories() {
+        let tmp = TempDir::new().unwrap();
+        let docs = tmp.path().join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        write_file(tmp.path(), "root.txt", b"root");
+        write_file(&docs, "readme.txt", b"readme content");
+
+        let mut mock = MockBoppoDevice::new();
+        // Top-level listing contains the docs subdir (but not root.txt, which is missing on device).
+        mock.expect_read_dir()
+            .with(eq("/device"))
+            .once()
+            .returning(|_| Ok(vec![DirEntry {
+                name: "docs".to_owned(),
+                size: 0,
+                is_dir: true,
+            }]));
+        // Subdir is empty on the device.
+        mock.expect_read_dir()
+            .with(eq("/device/docs"))
+            .once()
+            .returning(|_| Ok(vec![]));
+        mock.expect_upload_file()
+            .with(eq("/device/root.txt"), always())
+            .once()
+            .returning(|_, _| Ok(()));
+        mock.expect_upload_file()
+            .with(eq("/device/docs/readme.txt"), always())
+            .once()
+            .returning(|_, _| Ok(()));
+
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+            .await
+            .unwrap();
+    }
+
+    /// With `--delete`, files that exist on the device but not on the host should be removed.
+    #[tokio::test]
+    async fn sync_dir_deletes_extra_device_files() {
+        let tmp = TempDir::new().unwrap(); // empty host directory
+
+        let mut mock = MockBoppoDevice::new();
+        mock.expect_read_dir()
+            .with(eq("/device"))
+            .once()
+            .returning(|_| Ok(vec![DirEntry {
+                name: "orphan.txt".to_owned(),
+                size: 100,
+                is_dir: false,
+            }]));
+        mock.expect_remove_file()
+            .with(eq("/device/orphan.txt"))
+            .once()
+            .returning(|_| Ok(()));
+
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", true, false, false)
+            .await
+            .unwrap();
+    }
+}
