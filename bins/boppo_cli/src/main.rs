@@ -37,6 +37,8 @@ enum Commands {
     Device(DeviceArgs),
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
+    /// Print the version and exit
+    Version,
 }
 
 #[derive(Debug, Args)]
@@ -233,6 +235,10 @@ async fn main() -> anyhow::Result<()> {
                 println!("Device {} paired and saved.", args.serial);
             }
         },
+
+        Commands::Version => {
+            println!("{}", env!("CARGO_PKG_VERSION"));
+        }
 
         Commands::DiscoverDevices => {
             eprintln!("Searching for Boppo devices (5s)...");
