@@ -66,6 +66,8 @@ enum WifiCommands {
     },
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
+    /// Pair with a new device via the pairing flow
+    Pair(DevicePairArgs),
 }
 
 #[derive(Debug, Args)]
@@ -181,8 +183,6 @@ enum DeviceCommands {
         /// Device serial number or nickname
         identifier: String,
     },
-    /// Pair with a new device via the pairing flow
-    Pair(DevicePairArgs),
 }
 
 #[derive(Debug, Args)]
@@ -304,6 +304,18 @@ async fn main() -> anyhow::Result<()> {
                     let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let output = client.run_command(&command).await?;
                     print!("{}", output);
+                }
+
+                WifiCommands::Pair(args) => {
+                    eprintln!("Pairing with device {}...", args.serial);
+                    let password = pair_device(&args.serial).await?;
+                    let creds = DeviceCredentials {
+                        password,
+                        nickname: args.nickname,
+                    };
+                    store.set_device(&args.serial, creds);
+                    store.save(&store_path)?;
+                    println!("Device {} paired and saved.", args.serial);
                 }
 
                 WifiCommands::DiscoverDevices => {
@@ -445,17 +457,6 @@ async fn main() -> anyhow::Result<()> {
                 println!("Default device set to {}.", serial);
             }
 
-            DeviceCommands::Pair(args) => {
-                eprintln!("Pairing with device {}...", args.serial);
-                let password = pair_device(&args.serial).await?;
-                let creds = DeviceCredentials {
-                    password,
-                    nickname: args.nickname,
-                };
-                store.set_device(&args.serial, creds);
-                store.save(&store_path)?;
-                println!("Device {} paired and saved.", args.serial);
-            }
         },
 
         Commands::Version => {
