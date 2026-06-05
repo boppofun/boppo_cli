@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_path};
 use boppo_device::{browse_mdns, pair_device, sync_dir};
 use boppo_device_https_client::{BoppoDevice, BoppoDeviceHttpsClient};
+use boppo_usb::{BoppoUsbPort, find_boppo_port};
 
 const MUSIC_DIR: &str = "/sd/activities/user/music";
 
@@ -37,6 +38,8 @@ enum Commands {
     },
     /// Manage registered devices
     Device(DeviceArgs),
+    /// Commands over USB serial
+    Usb(UsbArgs),
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
     /// List the contents of a directory on the device
@@ -49,6 +52,35 @@ enum Commands {
     UploadMusic(UploadMusicArgs),
     /// Print the version and exit
     Version,
+}
+
+#[derive(Debug, Args)]
+struct UsbArgs {
+    /// USB serial port to use (auto-detected if omitted)
+    #[arg(long)]
+    port: Option<String>,
+
+    #[command(subcommand)]
+    command: UsbCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum UsbCommands {
+    /// Run a shell command on the device over USB serial
+    RunCommand {
+        /// The command to run
+        command: String,
+    },
+    /// Send Wi-Fi credentials to the device over USB serial
+    SendWifi(SendWifiArgs),
+}
+
+#[derive(Debug, Args)]
+struct SendWifiArgs {
+    /// SSID of the network
+    ssid: String,
+    /// Password (omit for open networks)
+    password: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -324,6 +356,33 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
+        }
+
+        Commands::Usb(usb_args) => {
+            let port_path = match usb_args.port {
+                Some(p) => p,
+                None => find_boppo_port()
+                    .context("failed to enumerate USB ports")?
+                    .context("no Boppo device found on USB")?,
+            };
+            eprintln!("Using serial port: {}", port_path);
+            let mut port = BoppoUsbPort::open(&port_path)?;
+            match usb_args.command {
+                UsbCommands::RunCommand { command } => {
+                    let output = tokio::task::spawn_blocking(move || port.run_command(&command))
+                        .await??;
+                    print!("{}", output);
+                }
+                UsbCommands::SendWifi(args) => {
+                    let ssid = args.ssid;
+                    let password = args.password;
+                    tokio::task::spawn_blocking(move || {
+                        port.send_wifi_credentials(&ssid, password.as_deref())
+                    })
+                    .await??;
+                    eprintln!("Wi-Fi credentials sent.");
+                }
+            }
         }
 
         Commands::DiscoverDevices => {

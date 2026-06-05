@@ -12,5 +12,6 @@ anyhow = "1"
 boppo_credential_store = { path = "../../libs/boppo_credential_store" }
 boppo_device = { path = "../../libs/boppo_device" }
 boppo_device_https_client = { path = "../../libs/boppo_device_https_client" }
+boppo_usb = { path = "../../libs/boppo_usb" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
