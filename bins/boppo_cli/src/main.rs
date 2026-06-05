@@ -18,7 +18,7 @@ struct Cli {
     #[arg(long, global = true)]
     device: Option<String>,
 
-    /// Path to the credential store config file
+    /// Config file path
     #[arg(long, global = true)]
     config: Option<PathBuf>,
 
