@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1"
 async-recursion = "1"
 boppo_device_https_client = { path = "../boppo_device_https_client" }
-mdns-sd = "0.11"
+mdns-sd = { version = "0.11", default-features = false, features = ["async"] }
 
 [dev-dependencies]
 boppo_device_https_client = { path = "../boppo_device_https_client", features = ["mock"] }
