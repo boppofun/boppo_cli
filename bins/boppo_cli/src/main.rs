@@ -60,7 +60,7 @@ enum WifiCommands {
     /// Remove a file from the device
     RmFile(RmFileArgs),
     /// Run a shell command on the device
-    RunCommand {
+    ExecuteCommand {
         /// The command to run
         command: String,
     },
@@ -143,7 +143,7 @@ struct UsbArgs {
 #[derive(Debug, Subcommand)]
 enum UsbCommands {
     /// Run a shell command on the device over USB serial
-    RunCommand {
+    ExecuteCommand {
         /// The command to run
         command: String,
     },
@@ -299,7 +299,7 @@ async fn main() -> anyhow::Result<()> {
                     eprintln!("Removed {}", args.path);
                 }
 
-                WifiCommands::RunCommand { command } => {
+                WifiCommands::ExecuteCommand { command } => {
                     let (serial, creds) = get_active_device(&store, &cli.device)?;
                     let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let output = client.run_command(&command).await?;
@@ -386,7 +386,7 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("Using serial port: {}", port_path);
             let mut port = BoppoUsbPort::open(&port_path)?;
             match usb_args.command {
-                UsbCommands::RunCommand { command } => {
+                UsbCommands::ExecuteCommand { command } => {
                     let output = tokio::task::spawn_blocking(move || port.run_command(&command))
                         .await??;
                     print!("{}", output);
