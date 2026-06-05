@@ -1,5 +1,6 @@
 use anyhow::Context;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::PathBuf;
 
@@ -210,7 +211,12 @@ struct DevicePairArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let default_path: &'static OsStr =
+        Box::leak(default_store_path().into_os_string().into_boxed_os_str());
+    let matches = Cli::command()
+        .mut_arg("config", |a| a.default_value_os(default_path))
+        .get_matches();
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
 
     let store_path = cli.config.unwrap_or_else(default_store_path);
     let mut store = CredentialStore::load(&store_path)?;
