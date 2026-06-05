@@ -8,10 +8,13 @@ use std::path::{Path, PathBuf};
 pub struct DeviceCredentials {
     /// Bearer token returned by the device pairing flow.
     pub password: String,
-    /// Base URL of the device (e.g. `https://192.168.1.100:8080`).
-    pub url: String,
     /// Optional human-readable name for the device.
     pub nickname: Option<String>,
+}
+
+/// Returns the base HTTPS URL for a device given its serial number.
+pub fn device_url(serial: &str) -> String {
+    format!("https://boppo-{}.local", serial)
 }
 
 /// Persistent store of device credentials, backed by a TOML file.
@@ -22,7 +25,6 @@ pub struct DeviceCredentials {
 ///
 /// [devices.0120001234]
 /// password = "secret"
-/// url = "https://192.168.1.100:8080"
 /// nickname = "my-tablet"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

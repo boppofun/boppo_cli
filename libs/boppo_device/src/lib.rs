@@ -7,21 +7,20 @@ use std::collections::HashMap;
 pub struct DiscoveredDevice {
     pub serial: String,
     pub device_name: String,
-    /// Base HTTPS URL, e.g. `https://192.168.1.5:443`.
-    pub url: String,
 }
 
-/// Initiate the pairing flow for a device at `url` and return the bearer token.
+/// Initiate the pairing flow for a device and return the bearer token.
 ///
 /// Generates a request ID from the current timestamp and delegates to
 /// [`boppo_device_https_client::get_password`], which polls until the user
 /// approves or rejects the request on the device.
-pub async fn pair_device(url: &str) -> anyhow::Result<String> {
+pub async fn pair_device(serial: &str) -> anyhow::Result<String> {
+    let url = format!("https://boppo-{}.local", serial);
     let request_id: u64 = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    boppo_device_https_client::get_password(url, request_id).await
+    boppo_device_https_client::get_password(&url, request_id).await
 }
 
 /// Browse for Boppo devices on the local network via mDNS, blocking for up to 5 seconds.
@@ -33,7 +32,6 @@ pub async fn pair_device(url: &str) -> anyhow::Result<String> {
 /// from an async context.
 pub fn browse_mdns() -> anyhow::Result<Vec<DiscoveredDevice>> {
     use mdns_sd::{ServiceDaemon, ServiceEvent};
-    use std::net::IpAddr;
     use std::time::{Duration, Instant};
 
     let mdns = ServiceDaemon::new().context("failed to start mDNS daemon")?;
@@ -61,18 +59,7 @@ pub fn browse_mdns() -> anyhow::Result<Vec<DiscoveredDevice>> {
                     .get_property_val_str("device_name")
                     .unwrap_or("unknown")
                     .to_owned();
-                let ip = info
-                    .get_addresses()
-                    .iter()
-                    .find(|a| matches!(a, IpAddr::V4(_)))
-                    .or_else(|| info.get_addresses().iter().next())
-                    .map(|a| a.to_string())
-                    .unwrap_or_default();
-                devices.push(DiscoveredDevice {
-                    serial,
-                    device_name,
-                    url: format!("https://{}:443", ip),
-                });
+                devices.push(DiscoveredDevice { serial, device_name });
             }
             Ok(_) => {}
             Err(_) => break,

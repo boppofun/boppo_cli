@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_path};
+use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_path, device_url};
 use boppo_device::{browse_mdns, pair_device, sync_dir};
 use boppo_device_https_client::{BoppoDevice, BoppoDeviceHttpsClient};
 use boppo_usb::{BoppoUsbPort, find_boppo_port};
@@ -189,9 +189,6 @@ enum DeviceCommands {
 struct DeviceAddArgs {
     /// Device serial number
     serial: String,
-    /// Base URL of the device (e.g. https://192.168.1.100:443)
-    #[arg(long)]
-    url: String,
     /// Password / bearer token for the device
     #[arg(long)]
     password: String,
@@ -204,9 +201,6 @@ struct DeviceAddArgs {
 struct DevicePairArgs {
     /// Device serial number
     serial: String,
-    /// Base URL of the device (e.g. https://192.168.1.100:443)
-    #[arg(long)]
-    url: String,
     /// Optional nickname for the device
     #[arg(long)]
     nickname: Option<String>,
@@ -225,8 +219,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Wifi(wifi_args) => {
             match wifi_args.command {
                 WifiCommands::SyncDir(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     if args.dry_run {
                         eprintln!("Dry run...");
                     }
@@ -245,8 +239,8 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 WifiCommands::UploadFile(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let data = std::fs::read(&args.host_path)
                         .with_context(|| format!("failed to read {}", args.host_path))?;
                     client.upload_file(&args.device_path, data).await?;
@@ -254,8 +248,8 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 WifiCommands::UploadMusic(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     for path in &args.files {
                         let raw_name = path
                             .file_name()
@@ -271,8 +265,8 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 WifiCommands::DownloadFile(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let data = client.download_file(&args.device_path).await?;
                     std::fs::write(&args.host_path, &data)
                         .with_context(|| format!("failed to write {}", args.host_path))?;
@@ -285,8 +279,8 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 WifiCommands::LsDir(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let entries = client.read_dir(&args.path).await?;
                     if entries.is_empty() {
                         println!("(empty)");
@@ -299,15 +293,15 @@ async fn main() -> anyhow::Result<()> {
                 }
 
                 WifiCommands::RmFile(args) => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     client.remove_file(&args.path).await?;
                     eprintln!("Removed {}", args.path);
                 }
 
                 WifiCommands::RunCommand { command } => {
-                    let (_, creds) = get_active_device(&store, &cli.device)?;
-                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let (serial, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
                     let output = client.run_command(&command).await?;
                     print!("{}", output);
                 }
@@ -325,13 +319,13 @@ async fn main() -> anyhow::Result<()> {
                         let known = store.get_device(&device.serial).is_some();
                         if known {
                             println!(
-                                "  {} \"{}\" @ {} [already in store]",
-                                device.serial, device.device_name, device.url
+                                "  {} \"{}\" [already in store]",
+                                device.serial, device.device_name
                             );
                         } else {
                             println!(
-                                "  {} \"{}\" @ {} [not paired]",
-                                device.serial, device.device_name, device.url
+                                "  {} \"{}\" [not paired]",
+                                device.serial, device.device_name
                             );
                             print!("Pair with this device? [Y/n] ");
                             std::io::stdout().flush()?;
@@ -339,7 +333,7 @@ async fn main() -> anyhow::Result<()> {
                             std::io::stdin().read_line(&mut input)?;
                             let trimmed = input.trim();
                             if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
-                                let password = pair_device(&device.url).await?;
+                                let password = pair_device(&device.serial).await?;
                                 print!(
                                     "Nickname for this device (Enter for \"{}\"): ",
                                     device.device_name
@@ -355,11 +349,7 @@ async fn main() -> anyhow::Result<()> {
                                 };
                                 store.set_device(
                                     device.serial.clone(),
-                                    DeviceCredentials {
-                                        password,
-                                        url: device.url.clone(),
-                                        nickname,
-                                    },
+                                    DeviceCredentials { password, nickname },
                                 );
                                 if store.default.is_none() {
                                     store.set_default(device.serial.clone());
@@ -411,8 +401,8 @@ async fn main() -> anyhow::Result<()> {
                         let default_marker = if is_default { " [default]" } else { "" };
                         let nickname = creds.nickname.as_deref().unwrap_or("(none)");
                         println!(
-                            "{}{} | url: {} | nickname: {}",
-                            serial, default_marker, creds.url, nickname
+                            "{}{} | nickname: {}",
+                            serial, default_marker, nickname
                         );
                     }
                 }
@@ -421,7 +411,6 @@ async fn main() -> anyhow::Result<()> {
             DeviceCommands::Add(args) => {
                 let creds = DeviceCredentials {
                     password: args.password,
-                    url: args.url,
                     nickname: args.nickname,
                 };
                 store.set_device(&args.serial, creds);
@@ -458,10 +447,9 @@ async fn main() -> anyhow::Result<()> {
 
             DeviceCommands::Pair(args) => {
                 eprintln!("Pairing with device {}...", args.serial);
-                let password = pair_device(&args.url).await?;
+                let password = pair_device(&args.serial).await?;
                 let creds = DeviceCredentials {
                     password,
-                    url: args.url,
                     nickname: args.nickname,
                 };
                 store.set_device(&args.serial, creds);
