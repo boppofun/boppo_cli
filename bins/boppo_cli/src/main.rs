@@ -27,32 +27,106 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Commands over Wi-Fi (HTTPS)
+    Wifi(WifiArgs),
+    /// Commands over USB serial
+    Usb(UsbArgs),
+    /// Manage registered devices
+    Device(DeviceArgs),
+    /// Print the version and exit
+    Version,
+}
+
+// ── Wi-Fi ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Args)]
+struct WifiArgs {
+    #[command(subcommand)]
+    command: WifiCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum WifiCommands {
     /// Sync a local directory to the device
     SyncDir(SyncDirArgs),
     /// Upload a single file to the device
     UploadFile(UploadFileArgs),
+    /// Upload music files to the device
+    UploadMusic(UploadMusicArgs),
+    /// Download a file from the device to the local machine
+    DownloadFile(DownloadFileArgs),
+    /// List the contents of a directory on the device
+    LsDir(LsDirArgs),
+    /// Remove a file from the device
+    RmFile(RmFileArgs),
     /// Run a shell command on the device
     RunCommand {
         /// The command to run
         command: String,
     },
-    /// Manage registered devices
-    Device(DeviceArgs),
-    /// Commands over USB serial
-    Usb(UsbArgs),
     /// Discover Boppo devices on the local network via mDNS
     DiscoverDevices,
-    /// List the contents of a directory on the device
-    LsDir(LsDirArgs),
-    /// Remove a file from the device
-    RmFile(RmFileArgs),
-    /// Download a file from the device to the local machine
-    DownloadFile(DownloadFileArgs),
-    /// Upload music files to the device
-    UploadMusic(UploadMusicArgs),
-    /// Print the version and exit
-    Version,
 }
+
+#[derive(Debug, Args)]
+struct SyncDirArgs {
+    /// Local directory to sync from
+    #[arg(long)]
+    host_dir: String,
+    /// Device directory to sync to
+    #[arg(long)]
+    device_dir: String,
+    /// Delete extraneous files from destination
+    #[arg(short, long, default_value = "false")]
+    delete: bool,
+    /// Perform a dry run without making changes
+    #[arg(short, long, default_value = "false")]
+    dry_run: bool,
+    /// Print verbose progress messages
+    #[arg(short, long, default_value = "false")]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct UploadFileArgs {
+    /// Local file path to upload
+    #[arg(long)]
+    host_path: String,
+    /// Destination path on the device
+    #[arg(long)]
+    device_path: String,
+}
+
+#[derive(Debug, Args)]
+struct UploadMusicArgs {
+    /// One or more local music files to upload
+    #[arg(required = true)]
+    files: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct DownloadFileArgs {
+    /// Path of the file on the device
+    #[arg(long)]
+    device_path: String,
+    /// Local path to write the file to
+    #[arg(long)]
+    host_path: String,
+}
+
+#[derive(Debug, Args)]
+struct LsDirArgs {
+    /// Path on the device to list
+    path: String,
+}
+
+#[derive(Debug, Args)]
+struct RmFileArgs {
+    /// Path of the file to remove on the device
+    path: String,
+}
+
+// ── USB ──────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Args)]
 struct UsbArgs {
@@ -83,63 +157,7 @@ struct SendWifiArgs {
     password: Option<String>,
 }
 
-#[derive(Debug, Args)]
-struct SyncDirArgs {
-    /// Local directory to sync from
-    #[arg(long)]
-    host_dir: String,
-    /// Device directory to sync to
-    #[arg(long)]
-    device_dir: String,
-    /// Delete extraneous files from destination
-    #[arg(short, long, default_value = "false")]
-    delete: bool,
-    /// Perform a dry run without making changes
-    #[arg(short, long, default_value = "false")]
-    dry_run: bool,
-    /// Print verbose progress messages
-    #[arg(short, long, default_value = "false")]
-    verbose: bool,
-}
-
-#[derive(Debug, Args)]
-struct LsDirArgs {
-    /// Path on the device to list
-    path: String,
-}
-
-#[derive(Debug, Args)]
-struct RmFileArgs {
-    /// Path of the file to remove on the device
-    path: String,
-}
-
-#[derive(Debug, Args)]
-struct DownloadFileArgs {
-    /// Path of the file on the device
-    #[arg(long)]
-    device_path: String,
-    /// Local path to write the file to
-    #[arg(long)]
-    host_path: String,
-}
-
-#[derive(Debug, Args)]
-struct UploadMusicArgs {
-    /// One or more local music files to upload
-    #[arg(required = true)]
-    files: Vec<PathBuf>,
-}
-
-#[derive(Debug, Args)]
-struct UploadFileArgs {
-    /// Local file path to upload
-    #[arg(long)]
-    host_path: String,
-    /// Destination path on the device
-    #[arg(long)]
-    device_path: String,
-}
+// ── Device ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Args)]
 struct DeviceArgs {
@@ -194,6 +212,8 @@ struct DevicePairArgs {
     nickname: Option<String>,
 }
 
+// ── Main ─────────────────────────────────────────────────────────────────────
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -202,87 +222,183 @@ async fn main() -> anyhow::Result<()> {
     let mut store = CredentialStore::load(&store_path)?;
 
     match cli.command {
-        Commands::SyncDir(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            if args.dry_run {
-                eprintln!("Dry run...");
-            }
-            sync_dir(
-                &client,
-                &args.host_dir,
-                &args.device_dir,
-                args.delete,
-                args.dry_run,
-                args.verbose,
-            )
-            .await?;
-            if args.verbose {
-                eprintln!("Done syncing all files.");
-            }
-        }
+        Commands::Wifi(wifi_args) => {
+            match wifi_args.command {
+                WifiCommands::SyncDir(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    if args.dry_run {
+                        eprintln!("Dry run...");
+                    }
+                    sync_dir(
+                        &client,
+                        &args.host_dir,
+                        &args.device_dir,
+                        args.delete,
+                        args.dry_run,
+                        args.verbose,
+                    )
+                    .await?;
+                    if args.verbose {
+                        eprintln!("Done syncing all files.");
+                    }
+                }
 
-        Commands::LsDir(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            let entries = client.read_dir(&args.path).await?;
-            if entries.is_empty() {
-                println!("(empty)");
-            } else {
-                for entry in entries {
-                    let kind = if entry.is_dir { "d" } else { "f" };
-                    println!("{} {:>10}  {}", kind, entry.size, entry.name);
+                WifiCommands::UploadFile(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let data = std::fs::read(&args.host_path)
+                        .with_context(|| format!("failed to read {}", args.host_path))?;
+                    client.upload_file(&args.device_path, data).await?;
+                    eprintln!("Uploaded {} -> {}", args.host_path, args.device_path);
+                }
+
+                WifiCommands::UploadMusic(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    for path in &args.files {
+                        let raw_name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .with_context(|| format!("invalid file name: {}", path.display()))?;
+                        let sanitized = sanitize_file_name(raw_name);
+                        let device_path = format!("{}/{}", MUSIC_DIR, sanitized);
+                        let data = std::fs::read(path)
+                            .with_context(|| format!("failed to read {}", path.display()))?;
+                        client.upload_file(&device_path, data).await?;
+                        eprintln!("Uploaded {} -> {}", path.display(), device_path);
+                    }
+                }
+
+                WifiCommands::DownloadFile(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let data = client.download_file(&args.device_path).await?;
+                    std::fs::write(&args.host_path, &data)
+                        .with_context(|| format!("failed to write {}", args.host_path))?;
+                    eprintln!(
+                        "Downloaded {} -> {} ({} bytes)",
+                        args.device_path,
+                        args.host_path,
+                        data.len()
+                    );
+                }
+
+                WifiCommands::LsDir(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let entries = client.read_dir(&args.path).await?;
+                    if entries.is_empty() {
+                        println!("(empty)");
+                    } else {
+                        for entry in entries {
+                            let kind = if entry.is_dir { "d" } else { "f" };
+                            println!("{} {:>10}  {}", kind, entry.size, entry.name);
+                        }
+                    }
+                }
+
+                WifiCommands::RmFile(args) => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    client.remove_file(&args.path).await?;
+                    eprintln!("Removed {}", args.path);
+                }
+
+                WifiCommands::RunCommand { command } => {
+                    let (_, creds) = get_active_device(&store, &cli.device)?;
+                    let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
+                    let output = client.run_command(&command).await?;
+                    print!("{}", output);
+                }
+
+                WifiCommands::DiscoverDevices => {
+                    eprintln!("Searching for Boppo devices (5s)...");
+                    let devices = tokio::task::spawn_blocking(browse_mdns).await??;
+
+                    if devices.is_empty() {
+                        println!("No devices found.");
+                        return Ok(());
+                    }
+
+                    for device in devices {
+                        let known = store.get_device(&device.serial).is_some();
+                        if known {
+                            println!(
+                                "  {} \"{}\" @ {} [already in store]",
+                                device.serial, device.device_name, device.url
+                            );
+                        } else {
+                            println!(
+                                "  {} \"{}\" @ {} [not paired]",
+                                device.serial, device.device_name, device.url
+                            );
+                            print!("Pair with this device? [Y/n] ");
+                            std::io::stdout().flush()?;
+                            let mut input = String::new();
+                            std::io::stdin().read_line(&mut input)?;
+                            let trimmed = input.trim();
+                            if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
+                                let password = pair_device(&device.url).await?;
+                                print!(
+                                    "Nickname for this device (Enter for \"{}\"): ",
+                                    device.device_name
+                                );
+                                std::io::stdout().flush()?;
+                                let mut nick_input = String::new();
+                                std::io::stdin().read_line(&mut nick_input)?;
+                                let nick_input = nick_input.trim();
+                                let nickname = if nick_input.is_empty() {
+                                    Some(device.device_name.clone())
+                                } else {
+                                    Some(nick_input.to_owned())
+                                };
+                                store.set_device(
+                                    device.serial.clone(),
+                                    DeviceCredentials {
+                                        password,
+                                        url: device.url.clone(),
+                                        nickname,
+                                    },
+                                );
+                                if store.default.is_none() {
+                                    store.set_default(device.serial.clone());
+                                    println!("Set as default device.");
+                                }
+                                store.save(&store_path)?;
+                                println!("Device {} paired and saved.", device.serial);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Commands::RmFile(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            client.remove_file(&args.path).await?;
-            eprintln!("Removed {}", args.path);
-        }
-
-        Commands::DownloadFile(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            let data = client.download_file(&args.device_path).await?;
-            std::fs::write(&args.host_path, &data)
-                .with_context(|| format!("failed to write {}", args.host_path))?;
-            eprintln!("Downloaded {} -> {} ({} bytes)", args.device_path, args.host_path, data.len());
-        }
-
-        Commands::UploadMusic(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            for path in &args.files {
-                let raw_name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .with_context(|| format!("invalid file name: {}", path.display()))?;
-                let sanitized = sanitize_file_name(raw_name);
-                let device_path = format!("{}/{}", MUSIC_DIR, sanitized);
-                let data = std::fs::read(path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
-                client.upload_file(&device_path, data).await?;
-                eprintln!("Uploaded {} -> {}", path.display(), device_path);
+        Commands::Usb(usb_args) => {
+            let port_path = match usb_args.port {
+                Some(p) => p,
+                None => find_boppo_port()
+                    .context("failed to enumerate USB ports")?
+                    .context("no Boppo device found on USB")?,
+            };
+            eprintln!("Using serial port: {}", port_path);
+            let mut port = BoppoUsbPort::open(&port_path)?;
+            match usb_args.command {
+                UsbCommands::RunCommand { command } => {
+                    let output = tokio::task::spawn_blocking(move || port.run_command(&command))
+                        .await??;
+                    print!("{}", output);
+                }
+                UsbCommands::SendWifi(args) => {
+                    let ssid = args.ssid;
+                    let password = args.password;
+                    tokio::task::spawn_blocking(move || {
+                        port.send_wifi_credentials(&ssid, password.as_deref())
+                    })
+                    .await??;
+                    eprintln!("Wi-Fi credentials sent.");
+                }
             }
-        }
-
-        Commands::UploadFile(args) => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            let data = std::fs::read(&args.host_path)
-                .with_context(|| format!("failed to read {}", args.host_path))?;
-            client.upload_file(&args.device_path, data).await?;
-            eprintln!("Uploaded {} -> {}", args.host_path, args.device_path);
-        }
-
-        Commands::RunCommand { command } => {
-            let (_, creds) = get_active_device(&store, &cli.device)?;
-            let client = BoppoDeviceHttpsClient::new(&creds.url, &creds.password)?;
-            let output = client.run_command(&command).await?;
-            print!("{}", output);
         }
 
         Commands::Device(device_args) => match device_args.command {
@@ -356,93 +472,6 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
-        }
-
-        Commands::Usb(usb_args) => {
-            let port_path = match usb_args.port {
-                Some(p) => p,
-                None => find_boppo_port()
-                    .context("failed to enumerate USB ports")?
-                    .context("no Boppo device found on USB")?,
-            };
-            eprintln!("Using serial port: {}", port_path);
-            let mut port = BoppoUsbPort::open(&port_path)?;
-            match usb_args.command {
-                UsbCommands::RunCommand { command } => {
-                    let output = tokio::task::spawn_blocking(move || port.run_command(&command))
-                        .await??;
-                    print!("{}", output);
-                }
-                UsbCommands::SendWifi(args) => {
-                    let ssid = args.ssid;
-                    let password = args.password;
-                    tokio::task::spawn_blocking(move || {
-                        port.send_wifi_credentials(&ssid, password.as_deref())
-                    })
-                    .await??;
-                    eprintln!("Wi-Fi credentials sent.");
-                }
-            }
-        }
-
-        Commands::DiscoverDevices => {
-            eprintln!("Searching for Boppo devices (5s)...");
-            let devices = tokio::task::spawn_blocking(browse_mdns).await??;
-
-            if devices.is_empty() {
-                println!("No devices found.");
-                return Ok(());
-            }
-
-            for device in devices {
-                let known = store.get_device(&device.serial).is_some();
-                if known {
-                    println!(
-                        "  {} \"{}\" @ {} [already in store]",
-                        device.serial, device.device_name, device.url
-                    );
-                } else {
-                    println!(
-                        "  {} \"{}\" @ {} [not paired]",
-                        device.serial, device.device_name, device.url
-                    );
-                    print!("Pair with this device? [Y/n] ");
-                    std::io::stdout().flush()?;
-                    let mut input = String::new();
-                    std::io::stdin().read_line(&mut input)?;
-                    let trimmed = input.trim();
-                    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
-                        let password = pair_device(&device.url).await?;
-                        print!(
-                            "Nickname for this device (Enter for \"{}\"): ",
-                            device.device_name
-                        );
-                        std::io::stdout().flush()?;
-                        let mut nick_input = String::new();
-                        std::io::stdin().read_line(&mut nick_input)?;
-                        let nick_input = nick_input.trim();
-                        let nickname = if nick_input.is_empty() {
-                            Some(device.device_name.clone())
-                        } else {
-                            Some(nick_input.to_owned())
-                        };
-                        store.set_device(
-                            device.serial.clone(),
-                            DeviceCredentials {
-                                password,
-                                url: device.url.clone(),
-                                nickname,
-                            },
-                        );
-                        if store.default.is_none() {
-                            store.set_default(device.serial.clone());
-                            println!("Set as default device.");
-                        }
-                        store.save(&store_path)?;
-                        println!("Device {} paired and saved.", device.serial);
-                    }
-                }
-            }
         }
     }
 
