@@ -66,7 +66,7 @@ enum WifiCommands {
         command: String,
     },
     /// Discover Boppo devices on the local network via mDNS
-    DiscoverDevices,
+    Discover,
     /// Pair with a new device via the pairing flow
     Pair(DevicePairArgs),
 }
@@ -441,7 +441,7 @@ async fn run_wifi_commands(
             pair_and_save(store, &args.serial, store_path, nickname).await?;
         }
 
-        WifiCommands::DiscoverDevices => {
+        WifiCommands::Discover => {
             eprintln!("Searching for Boppo devices (5s)...");
             let devices = tokio::task::spawn_blocking(browse_mdns).await??;
 
