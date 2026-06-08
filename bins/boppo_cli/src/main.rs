@@ -237,17 +237,10 @@ async fn main() -> anyhow::Result<()> {
                         std::io::stdin().read_line(&mut input)?;
                         let trimmed = input.trim();
                         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
-                            eprintln!("Pairing with device {}...", serial);
-                            let password = pair_device(serial).await?;
-                            let existing_nickname = store
+                            let nickname = store
                                 .get_device(serial)
                                 .and_then(|c| c.nickname.clone());
-                            store.set_device(
-                                serial.as_str(),
-                                DeviceCredentials { password, nickname: existing_nickname },
-                            );
-                            store.save(&store_path)?;
-                            println!("Device {} re-paired and saved.", serial);
+                            pair_and_save(&mut store, serial, &store_path, nickname).await?;
                             return Ok(());
                         }
                     }
@@ -443,26 +436,9 @@ async fn run_wifi_commands(
         }
 
         WifiCommands::Pair(args) => {
-            eprintln!("Pairing with device {}...", args.serial);
-            let password = pair_device(&args.serial).await?;
             let existing_nickname = store.get_device(&args.serial).and_then(|c| c.nickname.clone());
-            let prompt_suffix = match &existing_nickname {
-                Some(nick) => format!("(Enter to keep \"{}\"): ", nick),
-                None => "(Enter to skip): ".to_owned(),
-            };
-            print!("Nickname {}", prompt_suffix);
-            std::io::stdout().flush()?;
-            let mut nick_input = String::new();
-            std::io::stdin().read_line(&mut nick_input)?;
-            let nick_input = nick_input.trim();
-            let nickname = if nick_input.is_empty() {
-                existing_nickname
-            } else {
-                Some(nick_input.to_owned())
-            };
-            store.set_device(&args.serial, DeviceCredentials { password, nickname });
-            store.save(store_path)?;
-            println!("Device {} paired and saved.", args.serial);
+            let nickname = prompt_nickname(existing_nickname.as_deref())?;
+            pair_and_save(store, &args.serial, store_path, nickname).await?;
         }
 
         WifiCommands::DiscoverDevices => {
@@ -492,36 +468,49 @@ async fn run_wifi_commands(
                     std::io::stdin().read_line(&mut input)?;
                     let trimmed = input.trim();
                     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
-                        let password = pair_device(&device.serial).await?;
-                        print!(
-                            "Nickname for this device (Enter for \"{}\"): ",
-                            device.device_name
-                        );
-                        std::io::stdout().flush()?;
-                        let mut nick_input = String::new();
-                        std::io::stdin().read_line(&mut nick_input)?;
-                        let nick_input = nick_input.trim();
-                        let nickname = if nick_input.is_empty() {
-                            Some(device.device_name.clone())
-                        } else {
-                            Some(nick_input.to_owned())
-                        };
-                        store.set_device(
-                            device.serial.clone(),
-                            DeviceCredentials { password, nickname },
-                        );
+                        let nickname = prompt_nickname(Some(&device.device_name))?;
                         if store.default.is_none() {
-                            store.set_default(device.serial.clone());
+                            store.set_default(&device.serial);
                             println!("Set as default device.");
                         }
-                        store.save(store_path)?;
-                        println!("Device {} paired and saved.", device.serial);
+                        pair_and_save(store, &device.serial, store_path, nickname).await?;
                     }
                 }
             }
         }
     }
     Ok(())
+}
+
+async fn pair_and_save(
+    store: &mut CredentialStore,
+    serial: &str,
+    store_path: &PathBuf,
+    nickname: Option<String>,
+) -> anyhow::Result<()> {
+    eprintln!("Pairing with device {}...", serial);
+    let password = pair_device(serial).await?;
+    store.set_device(serial, DeviceCredentials { password, nickname });
+    store.save(store_path)?;
+    println!("Device {} paired and saved.", serial);
+    Ok(())
+}
+
+fn prompt_nickname(default: Option<&str>) -> anyhow::Result<Option<String>> {
+    let prompt = match default {
+        Some(nick) => format!("Nickname (Enter for \"{}\"): ", nick),
+        None => "Nickname (Enter to skip): ".to_owned(),
+    };
+    print!("{}", prompt);
+    std::io::stdout().flush()?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    let input = input.trim();
+    Ok(if input.is_empty() {
+        default.map(str::to_owned)
+    } else {
+        Some(input.to_owned())
+    })
 }
 
 /// Returns true if the error chain contains a 401 Unauthorized device error.
