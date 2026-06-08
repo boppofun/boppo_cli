@@ -1,5 +1,13 @@
 use anyhow::Context;
 use reqwest::{Client, ClientBuilder};
+
+/// Errors returned by the Boppo device HTTP API.
+#[derive(Debug, thiserror::Error)]
+pub enum DeviceError {
+    /// The device returned HTTP 401 Unauthorized (wrong or expired password).
+    #[error("device returned 401 Unauthorized")]
+    Unauthorized,
+}
 use serde::{Deserialize, Serialize};
 
 /// A single entry returned by [`BoppoDevice::read_dir`].
@@ -103,6 +111,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("get-info request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("get-info returned status {}", status);
         }
@@ -121,6 +132,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("set-device-name request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("set-device-name returned status {}", status);
         }
@@ -139,6 +153,7 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .context("read-dir request failed")?;
         let status = resp.status().as_u16();
         match status {
+            401 => return Err(DeviceError::Unauthorized.into()),
             404 => return Ok(Vec::new()),
             200 => {}
             code => anyhow::bail!("read-dir returned status {}: {}", code, url),
@@ -168,6 +183,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("upload request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("upload returned status {}", status);
         }
@@ -185,6 +203,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("download request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("download returned status {}", status);
         }
@@ -204,6 +225,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("remove-file request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("remove-file returned status {}", status);
         }
@@ -222,6 +246,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("remove-dir request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("remove-dir returned status {}", status);
         }
@@ -240,6 +267,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("remove-dir-all request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("remove-dir-all returned status {}", status);
         }
@@ -257,6 +287,9 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
             .await
             .context("command request failed")?;
         let status = resp.status().as_u16();
+        if status == 401 {
+            return Err(DeviceError::Unauthorized.into());
+        }
         if status != 200 {
             anyhow::bail!("command returned status {}", status);
         }
