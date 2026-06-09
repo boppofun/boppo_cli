@@ -4,9 +4,14 @@ use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::PathBuf;
 
+use indicatif::{ProgressBar, ProgressStyle};
+use std::sync::Arc;
+
 use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_path, device_url};
 use boppo_device::{browse_mdns, pair_device, sync_dir};
-use boppo_device_https_client::{BoppoDevice, BoppoDeviceHttpsClient, DeviceError};
+use boppo_device_https_client::{
+    BoppoDevice, BoppoDeviceHttpsClient, DeviceError, ProgressCallback, ProgressFactory,
+};
 use boppo_usb::{BoppoUsbPort, find_boppo_port};
 
 const MUSIC_DIR: &str = "/sd/activities/user/music";
@@ -85,9 +90,12 @@ struct SyncDirArgs {
     /// Perform a dry run without making changes
     #[arg(short, long, default_value = "false")]
     dry_run: bool,
-    /// Print verbose progress messages
+    /// Print a summary line when finished
     #[arg(short, long, default_value = "false")]
     verbose: bool,
+    /// Disable per-file progress bars
+    #[arg(long, default_value = "false")]
+    no_progress: bool,
 }
 
 #[derive(Debug, Args)]
@@ -98,6 +106,9 @@ struct UploadFileArgs {
     /// Destination path on the device
     #[arg(long)]
     device_path: String,
+    /// Disable the progress bar
+    #[arg(long, default_value = "false")]
+    no_progress: bool,
 }
 
 #[derive(Debug, Args)]
@@ -353,13 +364,36 @@ async fn run_wifi_commands(
             if args.dry_run {
                 eprintln!("Dry run...");
             }
+            let progress_factory: Option<ProgressFactory> = if args.no_progress {
+                None
+            } else {
+                Some(Arc::new(|device_path: &str, total: u64| -> ProgressCallback {
+                    let label = std::path::Path::new(device_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(device_path)
+                        .to_owned();
+                    let device_path = device_path.to_owned();
+                    let pb = ProgressBar::new(total);
+                    pb.set_style(upload_style());
+                    pb.set_message(label);
+                    let pb2 = pb.clone();
+                    Arc::new(move |sent: u64, total: u64| {
+                        pb2.set_position(sent);
+                        if sent >= total {
+                            pb2.finish_and_clear();
+                            eprintln!("Uploaded {}", device_path);
+                        }
+                    })
+                }))
+            };
             sync_dir(
                 &client,
                 &args.host_dir,
                 &args.device_dir,
                 args.delete,
                 args.dry_run,
-                args.verbose,
+                progress_factory,
             )
             .await?;
             if args.verbose {
@@ -372,8 +406,25 @@ async fn run_wifi_commands(
             let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
             let data = std::fs::read(&args.host_path)
                 .with_context(|| format!("failed to read {}", args.host_path))?;
-            client.upload_file(&args.device_path, data).await?;
-            eprintln!("Uploaded {} -> {}", args.host_path, args.device_path);
+            if args.no_progress {
+                client.upload_file(&args.device_path, data, None).await?;
+                eprintln!("Uploaded {} -> {}", args.host_path, args.device_path);
+            } else {
+                let label = std::path::Path::new(&args.host_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(&args.host_path)
+                    .to_owned();
+                let pb = ProgressBar::new(data.len() as u64);
+                pb.set_style(upload_style());
+                pb.set_message(label);
+                let pb2 = pb.clone();
+                let progress: ProgressCallback =
+                    Arc::new(move |sent: u64, _total: u64| pb2.set_position(sent));
+                client.upload_file(&args.device_path, data, Some(progress)).await?;
+                pb.finish_with_message("done");
+                eprintln!("Uploaded {} -> {}", args.host_path, args.device_path);
+            }
         }
 
         WifiCommands::UploadMusic(args) => {
@@ -388,7 +439,7 @@ async fn run_wifi_commands(
                 let device_path = format!("{}/{}", MUSIC_DIR, sanitized);
                 let data = std::fs::read(path)
                     .with_context(|| format!("failed to read {}", path.display()))?;
-                client.upload_file(&device_path, data).await?;
+                client.upload_file(&device_path, data, None).await?;
                 eprintln!("Uploaded {} -> {}", path.display(), device_path);
             }
         }
@@ -511,6 +562,14 @@ fn prompt_nickname(default: Option<&str>) -> anyhow::Result<Option<String>> {
     } else {
         Some(input.to_owned())
     })
+}
+
+fn upload_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{msg:.bold}  [{wide_bar:.cyan/blue}]  {bytes}/{total_bytes}  {binary_bytes_per_sec}",
+    )
+    .unwrap()
+    .progress_chars("=>-")
 }
 
 /// Returns true if the error chain contains a 401 Unauthorized device error.

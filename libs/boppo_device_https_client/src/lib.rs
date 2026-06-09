@@ -1,5 +1,7 @@
 use anyhow::Context;
 use reqwest::{Client, ClientBuilder};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Errors returned by the Boppo device HTTP API.
 #[derive(Debug, thiserror::Error)]
@@ -8,7 +10,12 @@ pub enum DeviceError {
     #[error("device returned 401 Unauthorized")]
     Unauthorized,
 }
-use serde::{Deserialize, Serialize};
+
+/// Called with `(bytes_sent, total_bytes)` as data is uploaded.
+pub type ProgressCallback = Arc<dyn Fn(u64, u64) + Send + Sync>;
+
+/// Creates a per-file [`ProgressCallback`] given `(device_path, total_bytes)`.
+pub type ProgressFactory = Arc<dyn Fn(&str, u64) -> ProgressCallback + Send + Sync>;
 
 /// A single entry returned by [`BoppoDevice::read_dir`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,7 +48,15 @@ pub trait BoppoDevice: Send + Sync {
     async fn read_dir(&self, path: &str) -> anyhow::Result<Vec<DirEntry>>;
 
     /// Upload `data` to `path` on the device, creating the file if needed.
-    async fn upload_file(&self, path: &str, data: Vec<u8>) -> anyhow::Result<()>;
+    ///
+    /// If `progress` is provided it is called with `(bytes_sent, total_bytes)`
+    /// as chunks are written to the network.
+    async fn upload_file(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        progress: Option<ProgressCallback>,
+    ) -> anyhow::Result<()>;
 
     /// Download a file from `path` on the device.
     async fn download_file(&self, path: &str) -> anyhow::Result<Vec<u8>>;
@@ -171,14 +186,37 @@ impl BoppoDevice for BoppoDeviceHttpsClient {
         Ok(entries)
     }
 
-    async fn upload_file(&self, path: &str, data: Vec<u8>) -> anyhow::Result<()> {
+    async fn upload_file(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        progress: Option<ProgressCallback>,
+    ) -> anyhow::Result<()> {
         let url = format!("{}/files/upload", self.base_url);
+        let content_length = data.len() as u64;
+
+        let body = if let Some(cb) = progress {
+            const CHUNK: usize = 65536; // 64 KiB
+            let total = content_length;
+            let chunks: Vec<Vec<u8>> = data.chunks(CHUNK).map(<[u8]>::to_vec).collect();
+            let mut sent = 0u64;
+            let stream = futures_util::stream::iter(chunks.into_iter().map(move |chunk| {
+                sent += chunk.len() as u64;
+                cb(sent, total);
+                Ok::<Vec<u8>, std::io::Error>(chunk)
+            }));
+            reqwest::Body::wrap_stream(stream)
+        } else {
+            reqwest::Body::from(data)
+        };
+
         let resp = self
             .client
             .post(&url)
             .query(&[("path", path)])
             .bearer_auth(&self.bearer_token)
-            .body(data)
+            .header(reqwest::header::CONTENT_LENGTH, content_length)
+            .body(body)
             .send()
             .await
             .context("upload request failed")?;

@@ -1,5 +1,5 @@
 use anyhow::Context;
-use boppo_device_https_client::{BoppoDevice, DirEntry};
+use boppo_device_https_client::{BoppoDevice, DirEntry, ProgressFactory};
 use std::collections::HashMap;
 
 /// A device discovered via mDNS.
@@ -75,6 +75,10 @@ pub fn browse_mdns() -> anyhow::Result<Vec<DiscoveredDevice>> {
 /// Files are uploaded when missing or when their size differs from the host copy.
 /// With `delete = true`, files present on the device but absent on the host are removed.
 /// With `dry_run = true`, all changes are logged but nothing is actually written.
+///
+/// When `progress_factory` is provided, each file upload shows a streaming progress
+/// bar via the returned [`ProgressCallback`]. When `None`, a plain text line is printed
+/// instead.
 #[async_recursion::async_recursion]
 pub async fn sync_dir(
     device: &dyn BoppoDevice,
@@ -82,12 +86,8 @@ pub async fn sync_dir(
     device_dir: &str,
     delete: bool,
     dry_run: bool,
-    verbose: bool,
+    progress_factory: Option<ProgressFactory>,
 ) -> anyhow::Result<()> {
-    if verbose {
-        eprintln!("Syncing {}", device_dir);
-    }
-
     let host_entries = list_host_dir(host_dir)?;
     let device_entries_vec = device.read_dir(device_dir).await?;
     let device_entries: HashMap<String, &DirEntry> =
@@ -111,16 +111,20 @@ pub async fn sync_dir(
         let device_path = format!("{}/{}", device_dir, name);
         let contents = std::fs::read(&host_path)
             .with_context(|| format!("failed to read {}", host_path))?;
-        eprintln!(
-            "Uploading {} bytes because {}\n\tfrom: {}\n\tto: {}",
-            contents.len(),
-            reason,
-            host_path,
-            device_path,
-        );
+
+        let total = contents.len() as u64;
+
+        // When there's no progress factory (or dry run), emit a text line.
+        if dry_run || progress_factory.is_none() {
+            eprintln!(
+                "Uploading {} -> {} ({} bytes, {})",
+                host_path, device_path, total, reason
+            );
+        }
         if !dry_run {
+            let progress = progress_factory.as_ref().map(|f| f(&device_path, total));
             device
-                .upload_file(&device_path, contents)
+                .upload_file(&device_path, contents, progress)
                 .await
                 .with_context(|| format!("failed to upload {}", host_path))?;
         }
@@ -133,9 +137,16 @@ pub async fn sync_dir(
         }
         let new_host_dir = format!("{}/{}", host_dir, name);
         let new_device_dir = format!("{}/{}", device_dir, name);
-        sync_dir(device, &new_host_dir, &new_device_dir, delete, dry_run, verbose)
-            .await
-            .with_context(|| format!("failed to sync host dir: {}", host_dir))?;
+        sync_dir(
+            device,
+            &new_host_dir,
+            &new_device_dir,
+            delete,
+            dry_run,
+            progress_factory.clone(),
+        )
+        .await
+        .with_context(|| format!("failed to sync host dir: {}", host_dir))?;
     }
 
     // Delete files on the device that are absent from the host.
@@ -210,11 +221,11 @@ mod tests {
             .once()
             .returning(|_| Ok(vec![]));
         mock.expect_upload_file()
-            .with(eq("/device/hello.txt"), always())
+            .with(eq("/device/hello.txt"), always(), always())
             .once()
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
             .await
             .unwrap();
     }
@@ -236,7 +247,7 @@ mod tests {
             }]));
         // No expect_upload_file — mockall will panic if upload_file is called unexpectedly.
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
             .await
             .unwrap();
     }
@@ -257,11 +268,11 @@ mod tests {
                 is_dir: false,
             }]));
         mock.expect_upload_file()
-            .with(eq("/device/changed.txt"), always())
+            .with(eq("/device/changed.txt"), always(), always())
             .once()
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
             .await
             .unwrap();
     }
@@ -291,15 +302,15 @@ mod tests {
             .once()
             .returning(|_| Ok(vec![]));
         mock.expect_upload_file()
-            .with(eq("/device/root.txt"), always())
+            .with(eq("/device/root.txt"), always(), always())
             .once()
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
         mock.expect_upload_file()
-            .with(eq("/device/docs/readme.txt"), always())
+            .with(eq("/device/docs/readme.txt"), always(), always())
             .once()
-            .returning(|_, _| Ok(()));
+            .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, false)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
             .await
             .unwrap();
     }
@@ -323,7 +334,7 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", true, false, false)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", true, false, None)
             .await
             .unwrap();
     }
