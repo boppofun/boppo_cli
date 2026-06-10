@@ -1,6 +1,16 @@
 use anyhow::Context;
 use boppo_device_https_client::{BoppoDevice, DirEntry, ProgressFactory};
 use std::collections::HashMap;
+use std::sync::Arc;
+
+/// Callbacks used by [`sync_dir`] to report progress without coupling to a specific output mechanism.
+#[derive(Clone)]
+pub struct SyncStatus {
+    /// Called with the device directory path each time `sync_dir` enters a directory.
+    pub set_dir: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Called to emit a persistent line of output (e.g. "Removing …", "Uploading …").
+    pub println: Arc<dyn Fn(&str) + Send + Sync>,
+}
 
 /// A device discovered via mDNS.
 #[derive(Debug)]
@@ -87,7 +97,11 @@ pub async fn sync_dir(
     delete: bool,
     dry_run: bool,
     progress_factory: Option<ProgressFactory>,
+    status: Option<SyncStatus>,
 ) -> anyhow::Result<()> {
+    if let Some(s) = &status {
+        (s.set_dir)(device_dir);
+    }
     let host_entries = list_host_dir(host_dir)?;
     let device_entries_vec = device.read_dir(device_dir).await?;
     let device_entries: HashMap<String, &DirEntry> =
@@ -116,10 +130,12 @@ pub async fn sync_dir(
 
         // When there's no progress factory (or dry run), emit a text line.
         if dry_run || progress_factory.is_none() {
-            eprintln!(
-                "Uploading {} -> {} ({} bytes, {})",
-                host_path, device_path, total, reason
-            );
+            let msg = format!("Uploading {} -> {} ({} bytes, {})", host_path, device_path, total, reason);
+            if let Some(s) = &status {
+                (s.println)(&msg);
+            } else {
+                eprintln!("{}", msg);
+            }
         }
         if !dry_run {
             let progress = progress_factory.as_ref().map(|f| f(&device_path, total));
@@ -144,6 +160,7 @@ pub async fn sync_dir(
             delete,
             dry_run,
             progress_factory.clone(),
+            status.clone(),
         )
         .await
         .with_context(|| format!("failed to sync host dir: {}", host_dir))?;
@@ -159,7 +176,11 @@ pub async fn sync_dir(
                 continue;
             }
             let device_path = format!("{}/{}", device_dir, name);
-            eprintln!("Removing {}", device_path);
+            if let Some(s) = &status {
+                (s.println)(&format!("Removing {}", device_path));
+            } else {
+                eprintln!("Removing {}", device_path);
+            }
             if !dry_run {
                 device
                     .remove_file(&device_path)
@@ -225,7 +246,7 @@ mod tests {
             .once()
             .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None, None)
             .await
             .unwrap();
     }
@@ -247,7 +268,7 @@ mod tests {
             }]));
         // No expect_upload_file — mockall will panic if upload_file is called unexpectedly.
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None, None)
             .await
             .unwrap();
     }
@@ -272,7 +293,7 @@ mod tests {
             .once()
             .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None, None)
             .await
             .unwrap();
     }
@@ -310,7 +331,7 @@ mod tests {
             .once()
             .returning(|_, _, _| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", false, false, None, None)
             .await
             .unwrap();
     }
@@ -334,7 +355,7 @@ mod tests {
             .once()
             .returning(|_| Ok(()));
 
-        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", true, false, None)
+        sync_dir(&mock, tmp.path().to_str().unwrap(), "/device", true, false, None, None)
             .await
             .unwrap();
     }

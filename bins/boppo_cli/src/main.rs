@@ -4,11 +4,11 @@ use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::PathBuf;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 
 use boppo_credential_store::{CredentialStore, DeviceCredentials, default_store_path, device_url};
-use boppo_device::{browse_mdns, pair_device, sync_dir};
+use boppo_device::{SyncStatus, browse_mdns, pair_device, sync_dir};
 use boppo_device_https_client::{
     BoppoDevice, BoppoDeviceHttpsClient, DeviceError, ProgressCallback, ProgressFactory,
 };
@@ -364,28 +364,53 @@ async fn run_wifi_commands(
             if args.dry_run {
                 eprintln!("Dry run...");
             }
-            let progress_factory: Option<ProgressFactory> = if args.no_progress {
-                None
+            let (progress_factory, status, dir_bar) = if args.no_progress {
+                (None, None, None)
             } else {
-                Some(Arc::new(|device_path: &str, total: u64| -> ProgressCallback {
-                    let label = std::path::Path::new(device_path)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or(device_path)
-                        .to_owned();
-                    let device_path = device_path.to_owned();
-                    let pb = ProgressBar::new(total);
-                    pb.set_style(upload_style());
-                    pb.set_message(label);
-                    let pb2 = pb.clone();
-                    Arc::new(move |sent: u64, total: u64| {
-                        pb2.set_position(sent);
-                        if sent >= total {
-                            pb2.finish_and_clear();
-                            eprintln!("Uploaded {}", device_path);
-                        }
-                    })
-                }))
+                let mp = MultiProgress::new();
+                let dir_bar = mp.add(ProgressBar::new_spinner());
+                dir_bar.set_style(
+                    ProgressStyle::with_template("  {spinner:.dim} Syncing {msg}").unwrap(),
+                );
+                dir_bar.enable_steady_tick(std::time::Duration::from_millis(200));
+
+                let dir_bar_for_status = dir_bar.clone();
+                let dir_bar_for_println = dir_bar.clone();
+                let status = SyncStatus {
+                    set_dir: Arc::new(move |dir: &str| {
+                        dir_bar_for_status.set_message(dir.to_owned())
+                    }),
+                    println: Arc::new(move |line: &str| {
+                        dir_bar_for_println.println(line);
+                    }),
+                };
+
+                let dir_bar_for_factory = dir_bar.clone();
+                let mp_for_factory = mp.clone();
+                let factory: ProgressFactory =
+                    Arc::new(move |device_path: &str, total: u64| -> ProgressCallback {
+                        let label = std::path::Path::new(device_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(device_path)
+                            .to_owned();
+                        let device_path = device_path.to_owned();
+                        let pb = mp_for_factory
+                            .insert_after(&dir_bar_for_factory, ProgressBar::new(total));
+                        pb.set_style(upload_style());
+                        pb.set_message(label);
+                        let pb2 = pb.clone();
+                        let dir_bar_in_cb = dir_bar_for_factory.clone();
+                        Arc::new(move |sent: u64, total: u64| {
+                            pb2.set_position(sent);
+                            if sent >= total {
+                                pb2.finish_and_clear();
+                                dir_bar_in_cb.println(format!("Uploaded {}", device_path));
+                            }
+                        })
+                    });
+
+                (Some(factory), Some(status), Some(dir_bar))
             };
             sync_dir(
                 &client,
@@ -394,8 +419,12 @@ async fn run_wifi_commands(
                 args.delete,
                 args.dry_run,
                 progress_factory,
+                status,
             )
             .await?;
+            if let Some(pb) = dir_bar {
+                pb.finish_and_clear();
+            }
             if args.verbose {
                 eprintln!("Done syncing all files.");
             }

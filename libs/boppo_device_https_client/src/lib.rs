@@ -17,6 +17,9 @@ pub type ProgressCallback = Arc<dyn Fn(u64, u64) + Send + Sync>;
 /// Creates a per-file [`ProgressCallback`] given `(device_path, total_bytes)`.
 pub type ProgressFactory = Arc<dyn Fn(&str, u64) -> ProgressCallback + Send + Sync>;
 
+/// Called with the device directory path each time [`sync_dir`](boppo_device::sync_dir) enters a directory.
+pub type DirStatusCallback = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// A single entry returned by [`BoppoDevice::read_dir`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirEntry {
