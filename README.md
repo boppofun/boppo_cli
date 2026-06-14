@@ -1,15 +1,18 @@
-# Boppo Tools
+# Boppo CLI
 
-A collection of tools for controlling or developing on Boppo.
+A command-line interface for [Boppo](https://developer.boppo.com) which communicates over WiFi and USB.
 
-## Boppo CLI
+## Features
 
-A command-line interface for that connects to Boppo over WiFi and USB.
+* discovering and pairing with Boppo devices on the local network
+* sending files and syncing directories
+* executing commands
+* building and deploying activities
 
-Allows for discovering and pair with Boppo devices on the local network, sending files, executing commands, and more.
-
-### Installation
+## Installation
 
 ```bash
-cargo install --git https://github.com/boppofun/boppo_cli --branch stable --bin boppo
+cargo install boppo_cli
 ```
+
+Run `boppo completions` for shell completions.
