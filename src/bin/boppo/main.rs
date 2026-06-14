@@ -41,9 +41,9 @@ enum Commands {
     /// Commands over USB serial
     Usb(UsbArgs),
     /// Manage registered devices
-    Device(DeviceArgs),
+    Devices(DevicesArgs),
     /// Activity development commands (build, deploy, start)
-    Dev(DevArgs),
+    Activity(ActivityArgs),
     /// Print the version and exit
     Version,
     /// Print shell completion script to stdout
@@ -181,16 +181,16 @@ struct SendWifiArgs {
     password: Option<String>,
 }
 
-// ── Dev ──────────────────────────────────────────────────────────────────────
+// ── Activity ─────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Args)]
-struct DevArgs {
+struct ActivityArgs {
     #[command(subcommand)]
-    command: DevCommands,
+    command: ActivityCommands,
 }
 
 #[derive(Debug, Subcommand)]
-enum DevCommands {
+enum ActivityCommands {
     /// Compile the WebAssembly activity in the current directory
     Build(BuildArgs),
     /// Build, deploy, and start the activity (all three by default)
@@ -222,16 +222,16 @@ struct DeployArgs {
     no_start: bool,
 }
 
-// ── Device ───────────────────────────────────────────────────────────────────
+// ── Devices ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Args)]
-struct DeviceArgs {
+struct DevicesArgs {
     #[command(subcommand)]
-    command: DeviceCommands,
+    command: DevicesCommands,
 }
 
 #[derive(Debug, Subcommand)]
-enum DeviceCommands {
+enum DevicesCommands {
     /// List all registered devices
     List,
     /// Add a device to the credential store
@@ -321,8 +321,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Device(device_args) => match device_args.command {
-            DeviceCommands::List => {
+        Commands::Devices(device_args) => match device_args.command {
+            DevicesCommands::List => {
                 if store.devices.is_empty() {
                     println!("No devices registered.");
                 } else {
@@ -338,7 +338,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            DeviceCommands::Add(args) => {
+            DevicesCommands::Add(args) => {
                 let creds = DeviceCredentials {
                     password: args.password,
                     nickname: args.nickname,
@@ -348,7 +348,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("Device {} added.", args.serial);
             }
 
-            DeviceCommands::Remove { identifier } => {
+            DevicesCommands::Remove { identifier } => {
                 let serial = store
                     .resolve_device(&identifier)
                     .map(|(s, _)| s.to_owned())
@@ -365,7 +365,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            DeviceCommands::SetDefault { identifier } => {
+            DevicesCommands::SetDefault { identifier } => {
                 let serial = store
                     .resolve_device(&identifier)
                     .map(|(s, _)| s.to_owned())
@@ -391,11 +391,11 @@ async fn main() -> anyhow::Result<()> {
             println!("\n# To install: {install_hint}");
         }
 
-        Commands::Dev(dev_args) => {
+        Commands::Activity(activity_args) => {
             let active_serial = get_active_device(&store, &cli.device)
                 .ok()
                 .map(|(s, _)| s.to_owned());
-            let result = run_dev_commands(&mut store, &cli.device, dev_args).await;
+            let result = run_activity_commands(&mut store, &cli.device, activity_args).await;
             if let Err(ref e) = result {
                 if try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await? {
                     return Ok(());
@@ -568,17 +568,17 @@ async fn run_wifi_commands(
     Ok(())
 }
 
-async fn run_dev_commands(
+async fn run_activity_commands(
     store: &mut CredentialStore,
     device_arg: &Option<String>,
-    dev_args: DevArgs,
+    activity_args: ActivityArgs,
 ) -> anyhow::Result<()> {
-    match dev_args.command {
-        DevCommands::Build(args) => {
+    match activity_args.command {
+        ActivityCommands::Build(args) => {
             wasm::build(!args.no_optimize)?;
         }
 
-        DevCommands::Deploy(args) => {
+        ActivityCommands::Deploy(args) => {
             let package_name = if args.no_build {
                 wasm::package_name()?
             } else {
@@ -599,7 +599,7 @@ async fn run_dev_commands(
             }
         }
 
-        DevCommands::Start => {
+        ActivityCommands::Start => {
             let package_name = wasm::package_name()?;
             let (serial, creds) = get_active_device(store, device_arg)?;
             let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
@@ -753,6 +753,6 @@ fn get_active_device<'a>(
     } else {
         store
             .default_device()
-            .context("no default device set; use --device or `boppo device set-default`")
+            .context("no default device set; use --device or `boppo devices set-default`")
     }
 }
