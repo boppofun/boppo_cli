@@ -1,5 +1,6 @@
 use anyhow::Context;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap_complete::{Shell, generate};
 use std::ffi::OsStr;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -41,6 +42,11 @@ enum Commands {
     Device(DeviceArgs),
     /// Print the version and exit
     Version,
+    /// Print shell completion script to stdout
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 // ── Wi-Fi ────────────────────────────────────────────────────────────────────
@@ -88,7 +94,7 @@ struct SyncDirArgs {
     #[arg(short, long, default_value = "false")]
     delete: bool,
     /// Perform a dry run without making changes
-    #[arg(short, long, default_value = "false")]
+    #[arg(short = 'n', long, default_value = "false")]
     dry_run: bool,
     /// Print a summary line when finished
     #[arg(short, long, default_value = "false")]
@@ -342,6 +348,20 @@ async fn main() -> anyhow::Result<()> {
             }
 
         },
+
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "boppo", &mut std::io::stdout());
+            let install_hint = match shell {
+                Shell::Fish =>    "boppo completions fish > ~/.config/fish/completions/boppo.fish",
+                Shell::Bash =>    "boppo completions bash > ~/.local/share/bash-completion/completions/boppo",
+                Shell::Zsh =>     "boppo completions zsh > ~/.zfunc/_boppo",
+                Shell::Elvish =>  "boppo completions elvish >> ~/.config/elvish/lib/completions.elv",
+                Shell::PowerShell => "boppo completions powershell >> $PROFILE",
+                _ =>              "pipe this output to your shell's completion directory",
+            };
+            println!("\n# To install: {install_hint}");
+        }
 
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
