@@ -5,7 +5,7 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use std::ffi::OsStr;
 use std::io::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
@@ -286,10 +286,10 @@ async fn main() -> anyhow::Result<()> {
                 .ok()
                 .map(|(s, _)| s.to_owned());
             let result = run_wifi_commands(&mut store, &cli.device, &store_path, wifi_args).await;
-            if let Err(ref e) = result {
-                if try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await? {
-                    return Ok(());
-                }
+            if let Err(ref e) = result
+                && try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await?
+            {
+                return Ok(());
             }
             result?;
         }
@@ -396,10 +396,10 @@ async fn main() -> anyhow::Result<()> {
                 .ok()
                 .map(|(s, _)| s.to_owned());
             let result = run_activity_commands(&mut store, &cli.device, activity_args).await;
-            if let Err(ref e) = result {
-                if try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await? {
-                    return Ok(());
-                }
+            if let Err(ref e) = result
+                && try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await?
+            {
+                return Ok(());
             }
             result?;
         }
@@ -415,13 +415,13 @@ async fn main() -> anyhow::Result<()> {
 async fn run_wifi_commands(
     store: &mut CredentialStore,
     device_arg: &Option<String>,
-    store_path: &PathBuf,
+    store_path: &Path,
     wifi_args: WifiArgs,
 ) -> anyhow::Result<()> {
     match wifi_args.command {
         WifiCommands::SyncDir(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             if args.dry_run {
                 eprintln!("Dry run...");
             }
@@ -437,7 +437,7 @@ async fn run_wifi_commands(
 
         WifiCommands::UploadFile(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             let data = std::fs::read(&args.host_path)
                 .with_context(|| format!("failed to read {}", args.host_path))?;
             if args.no_progress {
@@ -463,7 +463,7 @@ async fn run_wifi_commands(
 
         WifiCommands::UploadMusic(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             for path in &args.files {
                 let raw_name = path
                     .file_name()
@@ -480,7 +480,7 @@ async fn run_wifi_commands(
 
         WifiCommands::DownloadFile(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             let data = client.download_file(&args.device_path).await?;
             std::fs::write(&args.host_path, &data)
                 .with_context(|| format!("failed to write {}", args.host_path))?;
@@ -494,7 +494,7 @@ async fn run_wifi_commands(
 
         WifiCommands::LsDir(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             let entries = client.read_dir(&args.path).await?;
             if entries.is_empty() {
                 println!("(empty)");
@@ -508,14 +508,14 @@ async fn run_wifi_commands(
 
         WifiCommands::RmFile(args) => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             client.remove_file(&args.path).await?;
             eprintln!("Removed {}", args.path);
         }
 
         WifiCommands::ExecuteCommand { command } => {
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             let output = client.run_command(&command).await?;
             print!("{}", output);
         }
@@ -586,7 +586,7 @@ async fn run_activity_commands(
             };
 
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
 
             let staging = wasm::stage(&package_name)?;
             let device_dir = format!("{}/{}", wasm::DEVICE_ROOT, package_name);
@@ -602,7 +602,7 @@ async fn run_activity_commands(
         ActivityCommands::Start => {
             let package_name = wasm::package_name()?;
             let (serial, creds) = get_active_device(store, device_arg)?;
-            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             client.run_command(&wasm::start_command(&package_name)).await?;
             eprintln!("Started {}", package_name);
         }
@@ -616,7 +616,7 @@ async fn try_repair_on_unauthorized(
     err: &anyhow::Error,
     store: &mut CredentialStore,
     active_serial: &Option<String>,
-    store_path: &PathBuf,
+    store_path: &Path,
 ) -> anyhow::Result<bool> {
     if !is_unauthorized(err) {
         return Ok(false);
@@ -687,7 +687,7 @@ async fn sync_with_progress(
 async fn pair_and_save(
     store: &mut CredentialStore,
     serial: &str,
-    store_path: &PathBuf,
+    store_path: &Path,
     nickname: Option<String>,
 ) -> anyhow::Result<()> {
     eprintln!("Pairing with device {}...", serial);
@@ -734,10 +734,7 @@ fn is_unauthorized(err: &anyhow::Error) -> bool {
 
 /// Mirrors the sanitizeFileName logic in the phone app's files_notifier.dart.
 fn sanitize_file_name(name: &str) -> String {
-    name.replace('\'', "")
-        .replace('\n', "")
-        .replace('?', "")
-        .replace('/', "")
+    name.replace(['\'', '\n', '?', '/'], "")
         .trim()
         .to_owned()
 }

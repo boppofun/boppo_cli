@@ -19,7 +19,7 @@ struct CargoPackage {
     name: String,
 }
 
-/// Walks up from cwd until it finds a Cargo.toml that contains a [package] section.
+/// Walks up from cwd until it finds a Cargo.toml that contains a \[package\] section.
 /// Returns (project_root, package_name).
 fn find_project() -> anyhow::Result<(PathBuf, String)> {
     let mut dir = std::env::current_dir().context("could not get current directory")?;

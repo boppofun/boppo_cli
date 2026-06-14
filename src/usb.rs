@@ -59,19 +59,19 @@ impl BoppoUsbPort {
 pub fn find_boppo_port() -> anyhow::Result<Option<String>> {
     let ports = serialport::available_ports().context("failed to enumerate serial ports")?;
     for port in ports {
-        if let serialport::SerialPortType::UsbPort(info) = &port.port_type {
-            if info.vid == BOPPO_USB_VID {
-                let is_boppo = info
-                    .manufacturer
+        if let serialport::SerialPortType::UsbPort(info) = &port.port_type
+            && info.vid == BOPPO_USB_VID
+        {
+            let is_boppo = info
+                .manufacturer
+                .as_deref()
+                .is_some_and(|m| m.contains("Boppo"))
+                || info
+                    .product
                     .as_deref()
-                    .is_some_and(|m| m.contains("Boppo"))
-                    || info
-                        .product
-                        .as_deref()
-                        .is_some_and(|p| p.contains("Boppo"));
-                if is_boppo {
-                    return Ok(Some(port.port_name));
-                }
+                    .is_some_and(|p| p.contains("Boppo"));
+            if is_boppo {
+                return Ok(Some(port.port_name));
             }
         }
     }

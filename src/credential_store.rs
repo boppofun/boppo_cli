@@ -107,7 +107,7 @@ impl CredentialStore {
     }
 
     /// Return the credentials for the default device, if one is configured.
-    pub fn default_device<'a>(&'a self) -> Option<(&'a str, &'a DeviceCredentials)> {
+    pub fn default_device(&self) -> Option<(&str, &DeviceCredentials)> {
         let serial = self.default.as_deref()?;
         let creds = self.devices.get(serial)?;
         Some((serial, creds))
