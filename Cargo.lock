@@ -127,7 +127,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84d7ced0ae9557296835c32bf1b1e02b44c746701f898460fb000d7eaa84f00a"
 
 [[package]]
-name = "boppo_tools"
+name = "boppo_cli"
 version = "0.2.0"
 dependencies = [
  "anyhow",

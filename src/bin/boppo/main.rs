@@ -10,12 +10,12 @@ use std::path::PathBuf;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 
-use boppo_tools::credential_store::{CredentialStore, DeviceCredentials, default_store_path, device_url};
-use boppo_tools::device::{SyncStatus, browse_mdns, pair_device, sync_dir};
-use boppo_tools::device_https_client::{
+use boppo_cli::credential_store::{CredentialStore, DeviceCredentials, default_store_path, device_url};
+use boppo_cli::device::{SyncStatus, browse_mdns, pair_device, sync_dir};
+use boppo_cli::device_https_client::{
     BoppoDevice, BoppoDeviceHttpsClient, DeviceError, ProgressCallback, ProgressFactory,
 };
-use boppo_tools::usb::{BoppoUsbPort, find_boppo_port};
+use boppo_cli::usb::{BoppoUsbPort, find_boppo_port};
 
 const MUSIC_DIR: &str = "/sd/activities/user/music";
 

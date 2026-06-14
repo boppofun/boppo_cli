@@ -1,5 +1,5 @@
 [package]
-name = "boppo_tools"
+name = "boppo_cli"
 version = "0.2.0"
 edition = "2021"
 description = "Library and CLI for managing Boppo devices"

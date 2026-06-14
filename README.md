@@ -11,5 +11,5 @@ Allows for discovering and pair with Boppo devices on the local network, sending
 ### Installation
 
 ```bash
-cargo install --git https://github.com/boppofun/boppo_tools --branch stable --bin boppo
+cargo install --git https://github.com/boppofun/boppo_cli --branch stable --bin boppo
 ```
