@@ -1,3 +1,5 @@
+mod wasm;
+
 use anyhow::Context;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::{Shell, generate};
@@ -40,6 +42,8 @@ enum Commands {
     Usb(UsbArgs),
     /// Manage registered devices
     Device(DeviceArgs),
+    /// Activity development commands (build, deploy, start)
+    Dev(DevArgs),
     /// Print the version and exit
     Version,
     /// Print shell completion script to stdout
@@ -177,6 +181,47 @@ struct SendWifiArgs {
     password: Option<String>,
 }
 
+// ── Dev ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Args)]
+struct DevArgs {
+    #[command(subcommand)]
+    command: DevCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum DevCommands {
+    /// Compile the WebAssembly activity in the current directory
+    Build(BuildArgs),
+    /// Build, deploy, and start the activity (all three by default)
+    Deploy(DeployArgs),
+    /// Start the deployed activity on the device
+    Start,
+}
+
+#[derive(Debug, Args)]
+struct BuildArgs {
+    /// Skip wasm-opt optimization
+    #[arg(long)]
+    no_optimize: bool,
+}
+
+#[derive(Debug, Args)]
+struct DeployArgs {
+    /// Skip wasm-opt optimization
+    #[arg(long)]
+    no_optimize: bool,
+    /// Delete files on the device that are no longer in the local build
+    #[arg(long)]
+    delete: bool,
+    /// Skip the build step (deploy whatever is already compiled)
+    #[arg(long)]
+    no_build: bool,
+    /// Skip starting the activity after deploying
+    #[arg(long)]
+    no_start: bool,
+}
+
 // ── Device ───────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Args)]
@@ -237,30 +282,13 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Wifi(wifi_args) => {
-            let active_serial: Option<String> = get_active_device(&store, &cli.device)
+            let active_serial = get_active_device(&store, &cli.device)
                 .ok()
                 .map(|(s, _)| s.to_owned());
-
-            let result =
-                run_wifi_commands(&mut store, &cli.device, &store_path, wifi_args).await;
-
+            let result = run_wifi_commands(&mut store, &cli.device, &store_path, wifi_args).await;
             if let Err(ref e) = result {
-                if is_unauthorized(e) {
-                    eprintln!("Error: unauthorized (401) — is the password correct?");
-                    if let Some(ref serial) = active_serial {
-                        print!("Re-pair with device {}? [Y/n] ", serial);
-                        std::io::stdout().flush()?;
-                        let mut input = String::new();
-                        std::io::stdin().read_line(&mut input)?;
-                        let trimmed = input.trim();
-                        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
-                            let nickname = store
-                                .get_device(serial)
-                                .and_then(|c| c.nickname.clone());
-                            pair_and_save(&mut store, serial, &store_path, nickname).await?;
-                            return Ok(());
-                        }
-                    }
+                if try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await? {
+                    return Ok(());
                 }
             }
             result?;
@@ -363,6 +391,19 @@ async fn main() -> anyhow::Result<()> {
             println!("\n# To install: {install_hint}");
         }
 
+        Commands::Dev(dev_args) => {
+            let active_serial = get_active_device(&store, &cli.device)
+                .ok()
+                .map(|(s, _)| s.to_owned());
+            let result = run_dev_commands(&mut store, &cli.device, dev_args).await;
+            if let Err(ref e) = result {
+                if try_repair_on_unauthorized(e, &mut store, &active_serial, &store_path).await? {
+                    return Ok(());
+                }
+            }
+            result?;
+        }
+
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
         }
@@ -384,66 +425,10 @@ async fn run_wifi_commands(
             if args.dry_run {
                 eprintln!("Dry run...");
             }
-            let (progress_factory, status, dir_bar) = if args.no_progress {
-                (None, None, None)
+            if args.no_progress {
+                sync_dir(&client, &args.host_dir, &args.device_dir, args.delete, args.dry_run, None, None).await?;
             } else {
-                let mp = MultiProgress::new();
-                let dir_bar = mp.add(ProgressBar::new_spinner());
-                dir_bar.set_style(
-                    ProgressStyle::with_template("  {spinner:.dim} Syncing {msg}").unwrap(),
-                );
-                dir_bar.enable_steady_tick(std::time::Duration::from_millis(200));
-
-                let dir_bar_for_status = dir_bar.clone();
-                let dir_bar_for_println = dir_bar.clone();
-                let status = SyncStatus {
-                    set_dir: Arc::new(move |dir: &str| {
-                        dir_bar_for_status.set_message(dir.to_owned())
-                    }),
-                    println: Arc::new(move |line: &str| {
-                        dir_bar_for_println.println(line);
-                    }),
-                };
-
-                let dir_bar_for_factory = dir_bar.clone();
-                let mp_for_factory = mp.clone();
-                let factory: ProgressFactory =
-                    Arc::new(move |device_path: &str, total: u64| -> ProgressCallback {
-                        let label = std::path::Path::new(device_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(device_path)
-                            .to_owned();
-                        let device_path = device_path.to_owned();
-                        let pb = mp_for_factory
-                            .insert_after(&dir_bar_for_factory, ProgressBar::new(total));
-                        pb.set_style(upload_style());
-                        pb.set_message(label);
-                        let pb2 = pb.clone();
-                        let dir_bar_in_cb = dir_bar_for_factory.clone();
-                        Arc::new(move |sent: u64, total: u64| {
-                            pb2.set_position(sent);
-                            if sent >= total {
-                                pb2.finish_and_clear();
-                                dir_bar_in_cb.println(format!("Uploaded {}", device_path));
-                            }
-                        })
-                    });
-
-                (Some(factory), Some(status), Some(dir_bar))
-            };
-            sync_dir(
-                &client,
-                &args.host_dir,
-                &args.device_dir,
-                args.delete,
-                args.dry_run,
-                progress_factory,
-                status,
-            )
-            .await?;
-            if let Some(pb) = dir_bar {
-                pb.finish_and_clear();
+                sync_with_progress(&client, &args.host_dir, &args.device_dir, args.delete, args.dry_run).await?;
             }
             if args.verbose {
                 eprintln!("Done syncing all files.");
@@ -578,7 +563,124 @@ async fn run_wifi_commands(
                 }
             }
         }
+
     }
+    Ok(())
+}
+
+async fn run_dev_commands(
+    store: &mut CredentialStore,
+    device_arg: &Option<String>,
+    dev_args: DevArgs,
+) -> anyhow::Result<()> {
+    match dev_args.command {
+        DevCommands::Build(args) => {
+            wasm::build(!args.no_optimize)?;
+        }
+
+        DevCommands::Deploy(args) => {
+            let package_name = if args.no_build {
+                wasm::package_name()?
+            } else {
+                wasm::build(!args.no_optimize)?
+            };
+
+            let (serial, creds) = get_active_device(store, device_arg)?;
+            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+
+            let staging = wasm::stage(&package_name)?;
+            let device_dir = format!("{}/{}", wasm::DEVICE_ROOT, package_name);
+            sync_with_progress(&client, staging.to_str().unwrap(), &device_dir, args.delete, false).await?;
+            eprintln!("Deployed {} to {}", package_name, device_dir);
+
+            if !args.no_start {
+                client.run_command(&wasm::start_command(&package_name)).await?;
+                eprintln!("Started {}", package_name);
+            }
+        }
+
+        DevCommands::Start => {
+            let package_name = wasm::package_name()?;
+            let (serial, creds) = get_active_device(store, device_arg)?;
+            let client = BoppoDeviceHttpsClient::new(&device_url(serial), &creds.password)?;
+            client.run_command(&wasm::start_command(&package_name)).await?;
+            eprintln!("Started {}", package_name);
+        }
+    }
+    Ok(())
+}
+
+/// If `err` is a 401, prompts the user to re-pair. Returns `true` if re-pairing succeeded
+/// (caller should return `Ok(())`), `false` if the error wasn't a 401 or the user declined.
+async fn try_repair_on_unauthorized(
+    err: &anyhow::Error,
+    store: &mut CredentialStore,
+    active_serial: &Option<String>,
+    store_path: &PathBuf,
+) -> anyhow::Result<bool> {
+    if !is_unauthorized(err) {
+        return Ok(false);
+    }
+    eprintln!("Error: unauthorized (401) — is the password correct?");
+    if let Some(serial) = active_serial {
+        print!("Re-pair with device {}? [Y/n] ", serial);
+        std::io::stdout().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let trimmed = input.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("y") {
+            let nickname = store.get_device(serial).and_then(|c| c.nickname.clone());
+            pair_and_save(store, serial, store_path, nickname).await?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+async fn sync_with_progress(
+    client: &BoppoDeviceHttpsClient,
+    host_dir: &str,
+    device_dir: &str,
+    delete: bool,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    let mp = MultiProgress::new();
+    let dir_bar = mp.add(ProgressBar::new_spinner());
+    dir_bar.set_style(ProgressStyle::with_template("  {spinner:.dim} Syncing {msg}").unwrap());
+    dir_bar.enable_steady_tick(std::time::Duration::from_millis(200));
+
+    let dir_bar_for_status = dir_bar.clone();
+    let dir_bar_for_println = dir_bar.clone();
+    let status = SyncStatus {
+        set_dir: Arc::new(move |dir: &str| dir_bar_for_status.set_message(dir.to_owned())),
+        println: Arc::new(move |line: &str| dir_bar_for_println.println(line)),
+    };
+
+    let dir_bar_for_factory = dir_bar.clone();
+    let mp_for_factory = mp.clone();
+    let factory: ProgressFactory = Arc::new(move |device_path: &str, total: u64| -> ProgressCallback {
+        let label = std::path::Path::new(device_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(device_path)
+            .to_owned();
+        let device_path = device_path.to_owned();
+        let pb = mp_for_factory.insert_after(&dir_bar_for_factory, ProgressBar::new(total));
+        pb.set_style(upload_style());
+        pb.set_message(label);
+        let pb2 = pb.clone();
+        let dir_bar_in_cb = dir_bar_for_factory.clone();
+        Arc::new(move |sent: u64, total: u64| {
+            pb2.set_position(sent);
+            if sent >= total {
+                pb2.finish_and_clear();
+                dir_bar_in_cb.println(format!("Uploaded {}", device_path));
+            }
+        })
+    });
+
+    sync_dir(client, host_dir, device_dir, delete, dry_run, Some(factory), Some(status)).await?;
+    dir_bar.finish_and_clear();
     Ok(())
 }
 
@@ -654,3 +756,4 @@ fn get_active_device<'a>(
             .context("no default device set; use --device or `boppo device set-default`")
     }
 }
+

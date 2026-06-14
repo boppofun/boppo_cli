@@ -10,6 +10,8 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 indicatif = "0.17"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 boppo_credential_store = { path = "../../libs/boppo_credential_store" }
 boppo_device = { path = "../../libs/boppo_device" }
 boppo_device_https_client = { path = "../../libs/boppo_device_https_client" }
