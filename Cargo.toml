@@ -3,6 +3,14 @@ name = "boppo_cli"
 version = "0.2.0"
 edition = "2021"
 description = "Library and CLI for managing Boppo devices"
+repository = "https://github.com/boppofun/boppo_cli"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/boppo-v{ version }-{ target }.tar.gz"
+bin-dir = "boppo{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [[bin]]
 name = "boppo"
