@@ -1,5 +1,5 @@
 use anyhow::Context;
-use boppo_device_https_client::{BoppoDevice, DirEntry, ProgressFactory};
+use crate::device_https_client::{BoppoDevice, DirEntry, ProgressFactory};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ pub struct DiscoveredDevice {
 /// Initiate the pairing flow for a device and return the bearer token.
 ///
 /// Generates a request ID from the current timestamp and delegates to
-/// [`boppo_device_https_client::get_password`], which polls until the user
+/// [`crate::device_https_client::get_password`], which polls until the user
 /// approves or rejects the request on the device.
 pub async fn pair_device(serial: &str) -> anyhow::Result<String> {
     let url = format!("https://boppo-{}.local", serial);
@@ -30,7 +30,7 @@ pub async fn pair_device(serial: &str) -> anyhow::Result<String> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    boppo_device_https_client::get_password(&url, request_id).await
+    crate::device_https_client::get_password(&url, request_id).await
 }
 
 /// Browse for Boppo devices on the local network via mDNS, blocking for up to 5 seconds.
@@ -87,8 +87,8 @@ pub fn browse_mdns() -> anyhow::Result<Vec<DiscoveredDevice>> {
 /// With `dry_run = true`, all changes are logged but nothing is actually written.
 ///
 /// When `progress_factory` is provided, each file upload shows a streaming progress
-/// bar via the returned [`ProgressCallback`]. When `None`, a plain text line is printed
-/// instead.
+/// bar via the returned [`ProgressCallback`](crate::device_https_client::ProgressCallback).
+/// When `None`, a plain text line is printed instead.
 #[async_recursion::async_recursion]
 pub async fn sync_dir(
     device: &dyn BoppoDevice,
@@ -222,7 +222,7 @@ fn list_host_dir(host_dir: &str) -> anyhow::Result<HashMap<String, HostFileAttr>
 #[cfg(test)]
 mod tests {
     use super::sync_dir;
-    use boppo_device_https_client::{DirEntry, MockBoppoDevice};
+    use crate::device_https_client::{DirEntry, MockBoppoDevice};
     use mockall::predicate::{always, eq};
     use tempfile::TempDir;
 

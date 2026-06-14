@@ -1,9 +1,38 @@
-[workspace]
-members = [
-    "libs/boppo_device_https_client",
-    "libs/boppo_credential_store",
-    "libs/boppo_device",
-    "libs/boppo_usb",
-    "bins/boppo_cli",
-]
-resolver = "2"
+[package]
+name = "boppo_tools"
+version = "0.2.0"
+edition = "2021"
+description = "Library and CLI for managing Boppo devices"
+
+[[bin]]
+name = "boppo"
+path = "src/bin/boppo/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:clap", "dep:clap_complete", "dep:indicatif"]
+mock = ["dep:mockall"]
+
+[dependencies]
+anyhow = "1"
+async-recursion = "1"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"], optional = true }
+clap_complete = { version = "4.6.5", optional = true }
+dirs = "6"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+indicatif = { version = "0.17", optional = true }
+mdns-sd = { version = "0.20", default-features = false, features = ["async"] }
+mockall = { version = "0.14", optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serialport = "4"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+toml = "1"
+
+[dev-dependencies]
+mockall = "0.14"
+tempfile = "3"
