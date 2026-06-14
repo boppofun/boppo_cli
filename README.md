@@ -15,4 +15,6 @@ A command-line interface for [Boppo](https://developer.boppo.com) which communic
 cargo install boppo_cli
 ```
 
+Or download a pre-built binary from the [releases page](https://github.com/boppofun/boppo_cli/releases).
+
 Run `boppo completions` for shell completions.
