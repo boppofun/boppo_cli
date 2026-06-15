@@ -2,8 +2,10 @@
 name = "boppo_cli"
 version = "0.2.0"
 edition = "2024"
-description = "Library and CLI for managing Boppo devices"
+description = "CLI and libraries for managing Boppo devices"
 repository = "https://github.com/boppofun/boppo_cli"
+homepage = "https://developer.boppo.com"
+license = "MIT OR Apache-2.0"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/boppo-v{ version }-{ target }.tar.gz"
