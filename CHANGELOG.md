@@ -7,6 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0](https://github.com/boppofun/boppo_cli/releases/tag/v0.2.0) - 2026-06-15
+## [0.2.1](https://github.com/boppofun/boppo_cli/releases/tag/v0.2.0) - 2026-06-15
 
 First pubic release!

@@ -1,6 +1,6 @@
 [package]
 name = "boppo_cli"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "CLI and libraries for managing Boppo devices"
 repository = "https://github.com/boppofun/boppo_cli"
