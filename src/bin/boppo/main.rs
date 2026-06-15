@@ -233,9 +233,9 @@ struct DevicesArgs {
 #[derive(Debug, Subcommand)]
 enum DevicesCommands {
     /// List all registered devices
-    List,
+    List(DevicesListArgs),
     /// Print the serial number and password for the active device
-    Get,
+    Get(DevicesGetArgs),
     /// Add a device to the credential store
     Add(DeviceAddArgs),
     /// Remove a device from the credential store
@@ -248,6 +248,20 @@ enum DevicesCommands {
         /// Device serial number or nickname
         identifier: String,
     },
+}
+
+#[derive(Debug, Args)]
+struct DevicesListArgs {
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct DevicesGetArgs {
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -324,26 +338,41 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Commands::Devices(device_args) => match device_args.command {
-            DevicesCommands::List => {
-                if store.devices.is_empty() {
+            DevicesCommands::List(args) => {
+                if args.json {
+                    let entries: Vec<_> = store.devices.iter().map(|(serial, creds)| {
+                        serde_json::json!({
+                            "serial": serial,
+                            "nickname": creds.nickname,
+                            "default": store.default.as_deref() == Some(serial.as_str()),
+                        })
+                    }).collect();
+                    println!("{}", serde_json::to_string_pretty(&entries)?);
+                } else if store.devices.is_empty() {
                     println!("No devices registered.");
                 } else {
                     for (serial, creds) in &store.devices {
                         let is_default = store.default.as_deref() == Some(serial.as_str());
                         let default_marker = if is_default { " [default]" } else { "" };
                         let nickname = creds.nickname.as_deref().unwrap_or("(none)");
-                        println!(
-                            "{} | nickname: {}{}",
-                            serial, nickname, default_marker
-                        );
+                        println!("{} | nickname: {}{}", serial, nickname, default_marker);
                     }
                 }
             }
 
-            DevicesCommands::Get => {
+            DevicesCommands::Get(args) => {
                 let (serial, creds) = get_active_device(&store, &cli.device)?;
-                println!("serial:   {}", serial);
-                println!("password: {}", creds.password);
+                if args.json {
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                        "serial": serial,
+                        "password": creds.password,
+                        "nickname": creds.nickname,
+                        "default": store.default.as_deref() == Some(serial),
+                    }))?);
+                } else {
+                    println!("serial:   {}", serial);
+                    println!("password: {}", creds.password);
+                }
             }
 
             DevicesCommands::Add(args) => {
