@@ -234,6 +234,8 @@ struct DevicesArgs {
 enum DevicesCommands {
     /// List all registered devices
     List,
+    /// Print the serial number and password for the active device
+    Get,
     /// Add a device to the credential store
     Add(DeviceAddArgs),
     /// Remove a device from the credential store
@@ -331,11 +333,17 @@ async fn main() -> anyhow::Result<()> {
                         let default_marker = if is_default { " [default]" } else { "" };
                         let nickname = creds.nickname.as_deref().unwrap_or("(none)");
                         println!(
-                            "{}{} | nickname: {}",
-                            serial, default_marker, nickname
+                            "{} | nickname: {}{}",
+                            serial, nickname, default_marker
                         );
                     }
                 }
+            }
+
+            DevicesCommands::Get => {
+                let (serial, creds) = get_active_device(&store, &cli.device)?;
+                println!("serial:   {}", serial);
+                println!("password: {}", creds.password);
             }
 
             DevicesCommands::Add(args) => {
