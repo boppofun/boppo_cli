@@ -80,6 +80,8 @@ enum WifiCommands {
         /// The command to run
         command: String,
     },
+    /// Fetch device information
+    GetInfo(WifiGetInfoArgs),
     /// Discover Boppo devices on the local network via mDNS
     Discover,
     /// Pair with a new device via the pairing flow
@@ -148,6 +150,13 @@ struct LsDirArgs {
 struct RmFileArgs {
     /// Path of the file to remove on the device
     path: String,
+}
+
+#[derive(Debug, Args)]
+struct WifiGetInfoArgs {
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 // ── USB ──────────────────────────────────────────────────────────────────────
@@ -555,6 +564,25 @@ async fn run_wifi_commands(
             let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
             let output = client.run_command(&command).await?;
             print!("{}", output);
+        }
+
+        WifiCommands::GetInfo(args) => {
+            let (serial, creds) = get_active_device(store, device_arg)?;
+            let client = BoppoDeviceHttpsClient::new(device_url(serial), &creds.password)?;
+            let info = client.get_info().await?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            } else if let Some(obj) = info.as_object() {
+                for (key, value) in obj {
+                    let display = match value {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    println!("{}: {}", key, display);
+                }
+            } else {
+                println!("{}", info);
+            }
         }
 
         WifiCommands::Pair(args) => {
